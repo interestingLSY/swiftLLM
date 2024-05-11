@@ -12,7 +12,7 @@ class LlamaPreLayer:
         self.model_config = model_config
         self.weights = weights
     
-    def forward_one_request(
+    def forward(
         self,
         input_ids: torch.Tensor
     ) -> torch.Tensor:

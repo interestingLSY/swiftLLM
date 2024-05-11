@@ -170,6 +170,7 @@ class LlamaWeight(WeightBase):
             self.layers.append(layer)
 
     def _post_process_after_load(self, getter: callable):
+        self.lm_head = self.lm_head.transpose(0, 1).contiguous()
         for layer in self.layers:
             layer.load_weights(getter)
 
