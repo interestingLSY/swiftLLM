@@ -31,6 +31,7 @@ if __name__ == '__main__':
     ]
 
     tokenizer = AutoTokenizer.from_pretrained(model_path)
+    outputs = []
 
     # Prompt phase
     input_ids = tokenizer(prompts)['input_ids']
@@ -40,10 +41,28 @@ if __name__ == '__main__':
         [],
         len(prompts)
     )
-    print(prompt_phase_outputs)
     print(tokenizer.batch_decode(prompt_phase_outputs, skip_special_tokens=True))
-    # for _ in range(10):
-    #     output_id = model.forward_one_request(input_ids)
-    #     print(tokenizer.decode(output_id), end="", flush=True)
-    #     input_ids = torch.cat([input_ids, torch.tensor([output_id], device="cuda")], dim=0)
-    # print()
+    outputs.append(prompt_phase_outputs)
+
+    seq_lens = [len(x) for x in input_ids]
+    last_round_outputs = prompt_phase_outputs
+    for _ in range(20):
+        for i, _ in enumerate(prompts):
+            seq_lens[i] += 1
+        start_time = time.perf_counter()
+        last_round_outputs = model.forward(
+            [[x] for x in last_round_outputs],
+            list(range(0, len(prompts))),
+            seq_lens,
+            0
+        )
+        torch.cuda.synchronize()
+        end_time = time.perf_counter()
+        print(f"Forward time (decoding): {(end_time - start_time)*1e3:.2f} ms")
+        print(tokenizer.batch_decode(last_round_outputs, skip_special_tokens=True))
+        outputs.append(last_round_outputs)
+    
+    for i, prompt in enumerate(prompts):
+        output_tokens = [x[i] for x in outputs]
+        output_text = tokenizer.decode(output_tokens, skip_special_tokens=True)
+        print(f"{prompt} | {output_text}")

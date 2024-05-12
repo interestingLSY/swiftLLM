@@ -49,7 +49,7 @@ class LlamaModel:
             self.engine_config.block_size,
             self.model_config.head_dim
         )
-        self.k_cache = torch.empty(kvcache_shape, dtype=torch.float16, device="cuda")
+        self.k_cache = torch.zeros(kvcache_shape, dtype=torch.float16, device="cuda")
         self.v_cache = torch.empty(kvcache_shape, dtype=torch.float16, device="cuda")
 
         # Initialize block manager
@@ -129,7 +129,7 @@ class LlamaModel:
         """
 
         flattened_input_ids = list(itertools.chain(*input_ids))
-        seq_lengths = [len(seq) for seq in input_ids]
+        seq_lengths = [len(seq) for seq in input_ids[:num_prefill_seqs]] + decoding_seq_lens_list
 
         batch_size = len(input_ids)
         num_tokens = len(flattened_input_ids)
@@ -142,16 +142,18 @@ class LlamaModel:
         decoding_seq_lens = torch.tensor(decoding_seq_lens_list, dtype=torch.int32, device="cuda")
         max_decoding_len = max(decoding_seq_lens_list) if decoding_seq_lens_list else 0
 
-        position_indices = torch.concat([
-            torch.arange(
-                0,
-                prefill_seq_len
-            )
-            for prefill_seq_len in prefill_seq_lens_list
-        ] + [
-            [decoding_seq_len-1]
-            for decoding_seq_len in decoding_seq_lens_list
-        ])
+        position_indices = torch.cat((
+            torch.concat([
+                torch.arange(
+                    0,
+                    prefill_seq_len,
+                    device="cuda",
+                    dtype=torch.int32
+                )
+                for prefill_seq_len in prefill_seq_lens_list
+            ]) if prefill_seq_lens_list else torch.empty(0, device="cuda", dtype=torch.int32),
+            decoding_seq_lens - 1
+        ), dim=0)
 
         self.block_manager.allocate_blocks_for_seqs(
             torch.tensor(seq_ids, dtype=torch.int32, device="cpu"),
@@ -162,7 +164,7 @@ class LlamaModel:
             batch_size = batch_size,
             num_tokens = num_tokens,
 
-            seq_ids = seq_ids,
+            seq_ids = torch.tensor(seq_ids, dtype=torch.int32, device="cuda"),
             softmax_scale = self.model_config.head_dim ** -0.5,
 
             num_prefill_seqs = num_prefill_seqs,

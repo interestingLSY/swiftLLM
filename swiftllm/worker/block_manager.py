@@ -21,6 +21,8 @@ class BlockManager:
     def _allocate_blocks(self, num_blocks: int) -> list[int]:
         if num_blocks > len(self.free_blocks_list):
             raise RuntimeError("Not enough free blocks available")
+        if num_blocks == 0:
+            return []
         blocks = self.free_blocks_list[-num_blocks:]
         self.free_blocks_list = self.free_blocks_list[:-num_blocks]
         return blocks
@@ -32,16 +34,17 @@ class BlockManager:
         self.free_blocks_list.extend(block_ids)
     
     def allocate_blocks_for_seqs(self, seq_ids: torch.Tensor, target_lens: torch.Tensor):
-        block_needed = (target_lens - self.allocated_lens[seq_ids] + self.block_size-1) // self.block_size
-        blocks = torch.tensor(self._allocate_blocks(torch.sum(block_needed)), dtype=torch.int32, device="cpu")
+        block_needed = (target_lens + (self.block_size-1)) // self.block_size - self.allocated_lens[seq_ids]
+        blocks = self._allocate_blocks(torch.sum(block_needed))
+        blocks = torch.tensor(blocks, dtype=torch.int32, device="cpu")
         for i, seq_id in enumerate(seq_ids):
-            num_blocks = block_needed[i].item()
-            if num_blocks == 0:
+            cur_num_blocks = block_needed[i].item()
+            if cur_num_blocks == 0:
                 continue
-            seq_block_ids = blocks[-num_blocks:]
-            self.block_table[seq_id, self.allocated_lens[seq_id]:self.allocated_lens[seq_id]+block_needed[i]] = seq_block_ids
+            seq_block_ids = blocks[-cur_num_blocks:]
+            self.block_table[seq_id, self.allocated_lens[seq_id]: self.allocated_lens[seq_id]+cur_num_blocks] = seq_block_ids
             self.allocated_lens[seq_id] += block_needed[i]
-            blocks = blocks[:-num_blocks]
+            blocks = blocks[:-cur_num_blocks]
         assert len(blocks) == 0
     
     def free_blocks_for_seqs(self, seq_ids: torch.Tensor):

@@ -4,10 +4,13 @@ import vllm_flash_attn
 from swiftllm.model_config import LlamaModelConfig
 from swiftllm.engine_config import EngineConfig
 from swiftllm.worker.weight import LlamaTransformerLayerWeight
+from swiftllm.worker.infer_state import LlamaInferState
+
 from swiftllm.worker.kernels.rmsnorm import rmsnorm_forward
 from swiftllm.worker.kernels.rotary_emb import rotary_emb_fwd
-from swiftllm.worker.infer_state import LlamaInferState
-from swiftllm.worker.kernels.paged_attn_phase1 import paged_attention_phase1
+from swiftllm.worker.kernels.paged_attn import paged_attention
+from swiftllm.worker.kernels.kvcache_mgmt import store_kvcache
+from swiftllm.worker.kernels.silu_and_mul import silu_and_mul_inplace
 
 class LlamaTransformerLayer:
     def __init__(
@@ -56,6 +59,18 @@ class LlamaTransformerLayer:
             infer_state.position_sin
         )
 
+        store_kvcache(
+            k, v,
+            k_cache, v_cache,
+            block_table,
+            self.model_config,
+            self.engine_config,
+            infer_state,
+            self.layer_id
+        )
+        store_kvcache_event = torch.cuda.Event()
+        store_kvcache_event.record()
+
         # Attention
         o = torch.empty_like(input_embds)    # [num_total_tokens, hidden_size]
         if infer_state.num_prefill_seqs > 0:
@@ -72,10 +87,13 @@ class LlamaTransformerLayer:
             ).reshape(-1, self.model_config.hidden_size)
         if infer_state.num_decoding_seqs > 0:
             with torch.cuda.stream(self.decoding_piggyback_stream):
-                mid_o, mid_o_logexpsum = paged_attention_phase1(
-                    q, k_cache, v_cache, block_table,
+                torch.cuda.current_stream().wait_event(store_kvcache_event)
+                paged_attention(
+                    q[infer_state.num_prefill_tokens:, :, :],
+                    k_cache, v_cache, block_table,
                     self.model_config, self.engine_config, infer_state,
-                    self.layer_id
+                    self.layer_id,
+                    o[infer_state.num_prefill_tokens:, :],
                 )
                 event = torch.cuda.Event()
                 event.record()
@@ -96,9 +114,9 @@ class LlamaTransformerLayer:
 
         # FFN
         # TODO Fuse activation and pointwise multiplication
-        gate = torch.nn.functional.silu(torch.mm(ffn_input, self.weight.gate_proj))
-        up = torch.mm(ffn_input, self.weight.up_proj)
-        ffn_out = torch.mm(gate * up, self.weight.down_proj)
+        up_gate_proj = torch.mm(ffn_input, self.weight.up_gate_proj)    # [num_total_tokens, ffn_inter_dim*2]
+        silu_and_mul_inplace(up_gate_proj)
+        ffn_out = torch.mm(up_gate_proj[:, :self.model_config.ffn_inter_dim], self.weight.down_proj)
 
         # Residual
         ffn_out += o

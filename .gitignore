@@ -2,6 +2,10 @@
 /.vscode
 /.history
 
+# NVIDIA Nsight Systems profiler files
+*.nsys-rep
+*.sqlite
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
