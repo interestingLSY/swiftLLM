@@ -8,6 +8,7 @@ from swiftllm.engine_config import EngineConfig
 from swiftllm.model_config import LlamaModelConfig
 from swiftllm.worker.weight import load_weights
 from swiftllm.worker.block_manager import BlockManager
+from swiftllm.utils import cdiv
 
 from .layers.pre_layer import LlamaPreLayer
 from .layers.transformer_layer import LlamaTransformerLayer
@@ -160,6 +161,16 @@ class LlamaModel:
             torch.tensor(seq_lengths, dtype=torch.int32, device="cpu")
         )
 
+        # Select the seq_block_size
+        # In paged attention phase 1, the grid shape is (num_decoding_seqs, num_kv_heads, cdiv(max_decoding_len, seq_block_size))
+        # and among the grid, num_kv_heads * sum(cdiv(decoding_seq_lens, seq_block_size)) blocks are useful.
+        # Thus we set seq_block_size to be the largest integer that satisfies
+        #      num_kv_heads * sum(cdiv(decoding_seq_lens, seq_block_size)) >= 1024
+        seq_block_size = 2048
+        decoding_seq_lens_sum = sum(decoding_seq_lens_list)
+        while self.model_config.num_kv_heads*(decoding_seq_lens_sum/seq_block_size) < 1024 and seq_block_size//2 >= 64:
+            seq_block_size //= 2
+
         infer_state = LlamaInferState(
             batch_size = batch_size,
             num_tokens = num_tokens,
@@ -181,8 +192,8 @@ class LlamaModel:
             decoding_seq_lens = decoding_seq_lens,
             max_decoding_len = max_decoding_len,
 
-            seq_block_size = 256,   # TODO Tune this
-            num_seq_blocks = (max_decoding_len + 255) // 256,
+            seq_block_size = seq_block_size,
+            num_seq_blocks = (max_decoding_len + seq_block_size-1) // seq_block_size,
 
             position_cos = self._cos_cached[position_indices],
             position_sin = self._sin_cached[position_indices],
