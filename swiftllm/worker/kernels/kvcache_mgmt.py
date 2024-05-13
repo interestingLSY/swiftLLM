@@ -33,11 +33,11 @@ def _fwd_kvcache_mgmt_prefill_kernel(
     if my_block_id*block_size >= my_seq_len:
         return
     
-    my_token_range = tl.arange(0, block_size) + my_block_id*block_size + my_seq_start_loc
+    my_token_range = tl.arange(0, block_size).to(tl.int64) + my_block_id*block_size + my_seq_start_loc
     my_seq_id = tl.load(seq_ids + my_batch_id)
-    my_block_index = tl.load(block_table + my_seq_id*max_blocks_per_seq + my_block_id)
+    my_block_index = tl.load(block_table + my_seq_id*max_blocks_per_seq + my_block_id).to(tl.int64)
 
-    offs_kv = (my_token_range*num_kv_heads*head_dim)[:, None, None] + (tl.arange(0, num_kv_heads)*head_dim)[None, :, None] + tl.arange(0, head_dim)[None, None, :]
+    offs_kv = (my_token_range*num_kv_heads*head_dim).to(tl.int64)[:, None, None] + (tl.arange(0, num_kv_heads)*head_dim)[None, :, None] + tl.arange(0, head_dim)[None, None, :]
     offs_kvcache = (my_block_index*num_layers+cur_layer)*num_kv_heads*block_size*head_dim + \
         (tl.arange(0, num_kv_heads)*block_size*head_dim)[None, :, None] + \
         (tl.arange(0, block_size)*head_dim)[:, None, None] + \
@@ -65,12 +65,12 @@ def _fwd_kvcache_mgmt_decoding_kernel(
     max_blocks_per_seq: tl.constexpr,
 ):
     # grid shape: [num_decoding_seqs]
-    my_batch_id = tl.program_id(0)
+    my_batch_id = tl.program_id(0).to(tl.int64)
     my_seq_id = tl.load(decoding_seq_ids + my_batch_id)
     my_seq_len = tl.load(decoding_seq_lens + my_batch_id)
     my_block_id = (my_seq_len-1) // block_size
     my_block_offset = (my_seq_len-1) % block_size
-    my_block_index = tl.load(block_table + my_seq_id*max_blocks_per_seq + my_block_id)
+    my_block_index = tl.load(block_table + my_seq_id*max_blocks_per_seq + my_block_id).to(tl.int64)
 
     offs_kv = my_batch_id*num_kv_heads*head_dim + (tl.arange(0, num_kv_heads)*head_dim)[:, None] + tl.arange(0, head_dim)[None, :]
     offs_kvcache = (my_block_index*num_layers+cur_layer)*num_kv_heads*block_size*head_dim + (tl.arange(0, num_kv_heads)*block_size*head_dim)[:, None] + my_block_offset*head_dim + tl.arange(0, head_dim)[None, :]

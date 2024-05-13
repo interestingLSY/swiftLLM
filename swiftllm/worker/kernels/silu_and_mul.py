@@ -10,7 +10,7 @@ def _fwd_silu_and_mul(
 ):
     # grid shape: [num_tokens, ffn_inter_dim / block_size]
     # require ffn_inter_dim % block_size == 0
-    my_token_id = tl.program_id(0)
+    my_token_id = tl.program_id(0).to(tl.int64)
     my_block_id = tl.program_id(1)
 
     offs = my_token_id*(2*ffn_inter_dim) + my_block_id*block_size + tl.arange(0, block_size)

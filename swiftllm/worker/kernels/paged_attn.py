@@ -30,8 +30,8 @@ def _fwd_paged_attention_phase1(
     max_blocks_per_seq: tl.constexpr,
 ):
     # grid shape: [num_decoding_seqs, num_kv_heads, num_seq_blocks]
-    my_batch_id = tl.program_id(0)
-    my_kv_head_id = tl.program_id(1)
+    my_batch_id = tl.program_id(0).to(tl.int64)
+    my_kv_head_id = tl.program_id(1).to(tl.int64)
     my_seq_block_id = tl.program_id(2)
 
     my_seq_id = tl.load(seq_ids + my_batch_id)
@@ -59,7 +59,7 @@ def _fwd_paged_attention_phase1(
     for block_i in range(my_num_blocks):
         block_idx = my_start_token_idx//block_size + block_i
         offs_token = block_i*block_size + my_start_token_idx + tl.arange(0, block_size)
-        block_index = tl.load(block_table + my_seq_id*max_blocks_per_seq + block_idx)
+        block_index = tl.load(block_table + my_seq_id*max_blocks_per_seq + block_idx).to(tl.int64)
 
         offs_k = (tl.arange(0, block_size)*head_dim)[:, None] + (tl.arange(0, head_dim)+kv_offset+block_index*num_layers*num_kv_heads*block_size*head_dim)[None, :]
         k_block = tl.load(k_cache + offs_k,

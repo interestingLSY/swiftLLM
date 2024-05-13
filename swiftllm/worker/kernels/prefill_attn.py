@@ -46,8 +46,8 @@ def _fwd_prefill_attention(
     offs_my_q = range_my_q[:, None]*(num_q_heads*head_dim) + tl.arange(0, head_dim)[None, :]
     my_q = tl.load(q + offs_my_q, mask = range_my_q[:, None] < my_seq_len, cache_modifier=".cg") # [BLOCK_Q, head_dim]
 
-    k_ptrs = k + (tl.arange(0, BLOCK_K)*(num_kv_heads*head_dim))[None, :] + tl.arange(0, head_dim)[:, None]
-    v_ptrs = v + (tl.arange(0, BLOCK_K)*(num_kv_heads*head_dim))[:, None] + tl.arange(0, head_dim)[None, :]
+    k_ptrs = k + (tl.arange(0, BLOCK_K))[None, :]*(num_kv_heads*head_dim) + tl.arange(0, head_dim)[:, None]
+    v_ptrs = v + (tl.arange(0, BLOCK_K))[:, None]*(num_kv_heads*head_dim) + tl.arange(0, head_dim)[None, :]
 
     m_i = tl.full([BLOCK_Q], value=float("-1e20"), dtype=tl.float32)
     l_i = tl.zeros([BLOCK_Q], dtype=tl.float32)
