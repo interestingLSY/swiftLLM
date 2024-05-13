@@ -5,7 +5,6 @@ import triton.language as tl
 from swiftllm.model_config import LlamaModelConfig
 from swiftllm.engine_config import EngineConfig
 from swiftllm.worker.infer_state import LlamaInferState
-from swiftllm.utils import cdiv
 
 @triton.jit
 def _fwd_paged_attention_phase1(
@@ -73,8 +72,8 @@ def _fwd_paged_attention_phase1(
         
         cur_max_score = tl.max(attn_score, axis=1)  # [num_my_heads]
         new_max_score = tl.maximum(max_score, cur_max_score)
-        exp_attn_score = tl.exp(attn_score - new_max_score[:, None])
-        old_acc_scale = tl.exp(max_score - new_max_score)
+        exp_attn_score = tl.math.exp2(attn_score - new_max_score[:, None])
+        old_acc_scale = tl.math.exp2(max_score - new_max_score)
 
         acc = acc*old_acc_scale[:, None] + tl.sum(exp_attn_score[:, :, None]*v_block[None, :, :], axis=1)
         sum_exp = sum_exp*old_acc_scale + tl.sum(exp_attn_score, axis=1)
@@ -83,7 +82,7 @@ def _fwd_paged_attention_phase1(
     offs_mid_o = my_batch_id*num_q_heads*num_seq_blocks*head_dim + my_seq_block_id*head_dim + (offs_my_heads*num_seq_blocks*head_dim)[:, None] + tl.arange(0, head_dim)[None, :]
     tl.store(mid_o + offs_mid_o, acc / sum_exp[:, None])
     offs_mid_o_logexpsum = my_batch_id*num_q_heads*num_seq_blocks + my_seq_block_id + offs_my_heads*num_seq_blocks
-    tl.store(mid_o_logexpsum + offs_mid_o_logexpsum, tl.log(sum_exp) + max_score)   # Here tl.log(sum_exp) + max_score = log(sum(e^{a_i}))
+    tl.store(mid_o_logexpsum + offs_mid_o_logexpsum, tl.math.log2(sum_exp) + max_score)   # Here tl.log(sum_exp) + max_score = log(sum(e^{a_i}))
 
 
 @triton.jit
@@ -117,8 +116,8 @@ def _fwd_paged_attention_phase2(
         cur_mid_o_logexpsum = tl.load(mid_o_logexpsum + offs_mid_o_logexpsum)
 
         new_max_score = tl.maximum(max_score, cur_mid_o_logexpsum)
-        old_scale = tl.exp(max_score - new_max_score)
-        exp_score = tl.exp(cur_mid_o_logexpsum - new_max_score)
+        old_scale = tl.math.exp2(max_score - new_max_score)
+        exp_score = tl.math.exp2(cur_mid_o_logexpsum - new_max_score)
         acc = acc * old_scale + exp_score * cur_mid_o
         sum_exp = sum_exp * old_scale + exp_score
         max_score = new_max_score
@@ -161,7 +160,7 @@ def paged_attention(
         mid_o, mid_o_logexpsum,
         q, k_cache, v_cache,
         block_table,
-        infer_state.softmax_scale,
+        infer_state.softmax_scale * 1.442695040888963,  # Since we are going to use log2
         infer_state.decoding_seq_lens,
         infer_state.seq_ids[infer_state.num_prefill_seqs:],
         infer_state.num_seq_blocks,
@@ -175,6 +174,8 @@ def paged_attention(
         model_config.head_dim,
         infer_state.seq_block_size,
         engine_config.max_blocks_per_seq,
+        num_warps = 2,
+        num_stages = 4
     )
 
     grid = (infer_state.num_decoding_seqs, model_config.num_q_heads)

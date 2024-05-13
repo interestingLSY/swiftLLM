@@ -36,7 +36,7 @@ class BlockManager:
     
     def allocate_blocks_for_seqs(self, seq_ids: torch.Tensor, target_lens: torch.Tensor):
         target_num_blocks = (target_lens + (self.block_size-1)) // self.block_size
-        assert self.allocated_lens[seq_ids] <= target_num_blocks, f"Logic error: Some sequences have more blocks already allocated than needed. seq_ids: {seq_ids}, target_lens: {target_lens}, target_num_blocks: {target_num_blocks}, self.allocated_lens: {self.allocated_lens}"
+        assert (self.allocated_lens[seq_ids] <= target_num_blocks).all(), f"Logic error: Some sequences have more blocks already allocated than needed. seq_ids: {seq_ids}, target_lens: {target_lens}, target_num_blocks: {target_num_blocks}, self.allocated_lens: {self.allocated_lens}"
         block_needed = target_num_blocks - self.allocated_lens[seq_ids]
         blocks = self._allocate_blocks(torch.sum(block_needed))
         blocks = torch.tensor(blocks, dtype=torch.int32, device="cpu")

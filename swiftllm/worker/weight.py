@@ -126,15 +126,10 @@ class LlamaTransformerLayerWeight(WeightBase):
 
     def _post_process_after_load(self, getter: callable):
         # pylint: disable=no-member
-        # self.qkv_proj = torch.cat((self.q_proj, self.k_proj, self.v_proj), dim=0).transpose(0, 1).contiguous()
+        # self.qkv_proj = torch.cat((self.q_proj, self.k_proj, self.v_proj), dim=0).contiguous()
         # del self.q_proj, self.k_proj, self.v_proj
-        self.q_proj = self.q_proj.transpose(0, 1).contiguous()
-        self.k_proj = self.k_proj.transpose(0, 1).contiguous()
-        self.v_proj = self.v_proj.transpose(0, 1).contiguous()
-        self.o_proj = self.o_proj.transpose(0, 1).contiguous()
-        self.up_gate_proj = torch.cat((self.up_proj, self.gate_proj), dim=0).transpose(0, 1).contiguous()
+        self.up_gate_proj = torch.cat((self.up_proj, self.gate_proj), dim=0).contiguous()
         del self.up_proj, self.gate_proj
-        self.down_proj = self.down_proj.transpose(0, 1).contiguous()
 
 
 class LlamaWeight(WeightBase):
@@ -173,7 +168,6 @@ class LlamaWeight(WeightBase):
             self.layers.append(layer)
 
     def _post_process_after_load(self, getter: callable):
-        self.lm_head = self.lm_head.transpose(0, 1).contiguous()
         for layer in self.layers:
             layer.load_weights(getter)
 

@@ -6,9 +6,11 @@ from swiftllm.engine_config import EngineConfig
 from swiftllm.worker.weight import LlamaTransformerLayerWeight
 from swiftllm.worker.infer_state import LlamaInferState
 
+from swiftllm.worker.kernels.linear import linear
 from swiftllm.worker.kernels.rmsnorm import rmsnorm_forward
 from swiftllm.worker.kernels.rotary_emb import rotary_emb_fwd
 from swiftllm.worker.kernels.paged_attn import paged_attention
+from swiftllm.worker.kernels.prefill_attn import prefill_attention
 from swiftllm.worker.kernels.kvcache_mgmt import store_kvcache
 from swiftllm.worker.kernels.silu_and_mul import silu_and_mul_inplace
 
@@ -44,9 +46,9 @@ class LlamaTransformerLayer:
 
         # Calculate QKV
         # TODO Merge matmuls
-        q = torch.mm(attn_input, self.weight.q_proj)		# [num_total_tokens, hidden_size]
-        k = torch.mm(attn_input, self.weight.k_proj)		# [num_total_tokens, num_kv_heads*head_dim]
-        v = torch.mm(attn_input, self.weight.v_proj)		# [num_total_tokens, num_kv_heads*head_dim]
+        q = linear(attn_input, self.weight.q_proj)		# [num_total_tokens, hidden_size]
+        k = linear(attn_input, self.weight.k_proj)		# [num_total_tokens, num_kv_heads*head_dim]
+        v = linear(attn_input, self.weight.v_proj)		# [num_total_tokens, num_kv_heads*head_dim]
         q = q.view(-1, self.model_config.num_q_heads,  self.model_config.head_dim)	# [num_total_tokens, num_q_heads, head_dim]
         k = k.view(-1, self.model_config.num_kv_heads, self.model_config.head_dim)	# [num_total_tokens, num_kv_heads, head_dim]
         v = v.view(-1, self.model_config.num_kv_heads, self.model_config.head_dim)	# [num_total_tokens, num_kv_heads, head_dim]
@@ -74,17 +76,21 @@ class LlamaTransformerLayer:
         # Attention
         o = torch.empty_like(input_embds)    # [num_total_tokens, hidden_size]
         if infer_state.num_prefill_seqs > 0:
-            o[:infer_state.num_prefill_tokens, :] = vllm_flash_attn.flash_attn_varlen_func(
-                q[:infer_state.num_prefill_tokens, :, :],
-                k[:infer_state.num_prefill_tokens, :, :],
-                v[:infer_state.num_prefill_tokens, :, :],
-                infer_state.prefill_seq_start_locs_with_end,
-                infer_state.prefill_seq_start_locs_with_end,
-                infer_state.max_prefill_len,
-                infer_state.max_prefill_len,
-                softmax_scale=infer_state.softmax_scale,
-                causal=True
-            ).reshape(-1, self.model_config.hidden_size)
+            # o[:infer_state.num_prefill_tokens, :] = vllm_flash_attn.flash_attn_varlen_func(
+            #     q[:infer_state.num_prefill_tokens, :, :],
+            #     k[:infer_state.num_prefill_tokens, :, :],
+            #     v[:infer_state.num_prefill_tokens, :, :],
+            #     infer_state.prefill_seq_start_locs_with_end,
+            #     infer_state.prefill_seq_start_locs_with_end,
+            #     infer_state.max_prefill_len,
+            #     infer_state.max_prefill_len,
+            #     softmax_scale=infer_state.softmax_scale,
+            #     causal=True
+            # ).reshape(-1, self.model_config.hidden_size)
+            prefill_attention(
+                q, k, v, o[:infer_state.num_prefill_tokens, :],
+                self.model_config, self.engine_config, infer_state
+            )
         if infer_state.num_decoding_seqs > 0:
             with torch.cuda.stream(self.decoding_piggyback_stream):
                 torch.cuda.current_stream().wait_event(store_kvcache_event)
@@ -100,7 +106,7 @@ class LlamaTransformerLayer:
             torch.cuda.default_stream().wait_event(event)
         
         # Output GEMM
-        o = torch.mm(o, self.weight.o_proj)	# [num_total_tokens, hidden_size]
+        o = linear(o, self.weight.o_proj)	# [num_total_tokens, hidden_size]
 
         # Residual
         o += input_embds
@@ -114,10 +120,9 @@ class LlamaTransformerLayer:
         )
 
         # FFN
-        # TODO Fuse activation and pointwise multiplication
-        up_gate_proj = torch.mm(ffn_input, self.weight.up_gate_proj)    # [num_total_tokens, ffn_inter_dim*2]
+        up_gate_proj = linear(ffn_input, self.weight.up_gate_proj)
         silu_and_mul_inplace(up_gate_proj)
-        ffn_out = torch.mm(up_gate_proj[:, :self.model_config.ffn_inter_dim], self.weight.down_proj)
+        ffn_out = linear(up_gate_proj[:, :self.model_config.ffn_inter_dim], self.weight.down_proj)
 
         # Residual
         ffn_out += o

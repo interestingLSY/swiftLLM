@@ -4,6 +4,7 @@ from swiftllm.model_config import LlamaModelConfig
 from swiftllm.worker.weight import LlamaWeight
 from swiftllm.worker.kernels.rmsnorm import rmsnorm_forward
 from swiftllm.worker.infer_state import LlamaInferState
+from swiftllm.worker.kernels.linear import linear
 
 class LlamaPostLayer:
     def __init__(
@@ -34,7 +35,7 @@ class LlamaPostLayer:
             self.weights.final_norm,
             self.model_config.rms_norm_eps
         )
-        logits = torch.mm(last_input, self.weights.lm_head)    # [batch_size, vocab_size]
+        logits = linear(last_input, self.weights.lm_head)    # [batch_size, vocab_size]
         output_tokens = torch.argmax(logits, dim=1)
         return output_tokens
     

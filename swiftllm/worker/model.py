@@ -168,7 +168,8 @@ class LlamaModel:
         #      num_kv_heads * sum(cdiv(decoding_seq_lens, seq_block_size)) >= 1024
         seq_block_size = 2048
         decoding_seq_lens_sum = sum(decoding_seq_lens_list)
-        while self.model_config.num_kv_heads*(decoding_seq_lens_sum/seq_block_size) < 1024 and seq_block_size//2 >= 64:
+        while self.model_config.num_kv_heads*(decoding_seq_lens_sum/seq_block_size) < 1024 and seq_block_size//2 >= 64 and \
+            max_decoding_len / (seq_block_size//2) <= 128:
             seq_block_size //= 2
 
         infer_state = LlamaInferState(
