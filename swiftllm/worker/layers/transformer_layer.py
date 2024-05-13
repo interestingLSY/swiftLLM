@@ -1,5 +1,4 @@
 import torch
-import vllm_flash_attn
 
 from swiftllm.model_config import LlamaModelConfig
 from swiftllm.engine_config import EngineConfig
@@ -45,7 +44,6 @@ class LlamaTransformerLayer:
         )
 
         # Calculate QKV
-        # TODO Merge matmuls
         q = linear(attn_input, self.weight.q_proj)		# [num_total_tokens, hidden_size]
         k = linear(attn_input, self.weight.k_proj)		# [num_total_tokens, num_kv_heads*head_dim]
         v = linear(attn_input, self.weight.v_proj)		# [num_total_tokens, num_kv_heads*head_dim]
@@ -76,6 +74,7 @@ class LlamaTransformerLayer:
         # Attention
         o = torch.empty_like(input_embds)    # [num_total_tokens, hidden_size]
         if infer_state.num_prefill_seqs > 0:
+            # import vllm_flash_attn
             # o[:infer_state.num_prefill_tokens, :] = vllm_flash_attn.flash_attn_varlen_func(
             #     q[:infer_state.num_prefill_tokens, :, :],
             #     k[:infer_state.num_prefill_tokens, :, :],
@@ -110,7 +109,11 @@ class LlamaTransformerLayer:
 
         # Residual
         o += input_embds
+        
         input_embds = None
+        q = None
+        k = None
+        v = None        
 
         # FFN norm
         ffn_input = rmsnorm_forward(

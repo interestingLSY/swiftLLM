@@ -50,7 +50,7 @@ class LlamaModel:
             self.engine_config.block_size,
             self.model_config.head_dim
         )
-        self.k_cache = torch.zeros(kvcache_shape, dtype=torch.float16, device="cuda")
+        self.k_cache = torch.empty(kvcache_shape, dtype=torch.float16, device="cuda")
         self.v_cache = torch.empty(kvcache_shape, dtype=torch.float16, device="cuda")
 
         # Initialize block manager
@@ -75,7 +75,8 @@ class LlamaModel:
             for layer_id in range(self.model_config.num_layers)
         ]
         self.post_layer = LlamaPostLayer(self.model_config, self.weight)
-    
+        torch.cuda.empty_cache()
+
     def _init_to_get_rotary(self):
         rope_scaling_factor = self.model_config.rope_scaling
         base = self.model_config.rope_theta
@@ -83,7 +84,7 @@ class LlamaModel:
         max_seq_len = max_position_embeddings * rope_scaling_factor
 
         inv_freq = 1.0 / (base ** (torch.arange(0, self.model_config.head_dim, 2, device="cuda", dtype=torch.float32) / self.model_config.head_dim))
-        t = torch.arange(max_seq_len + 1024 * 128, device="cuda", dtype=torch.float32) / rope_scaling_factor
+        t = torch.arange(max_seq_len + 128, device="cuda", dtype=torch.float32) / rope_scaling_factor
         freqs = torch.outer(t, inv_freq)
 
         self._cos_cached = torch.cos(freqs).to(torch.float16)
