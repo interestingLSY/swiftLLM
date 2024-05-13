@@ -104,6 +104,7 @@ class LlamaTransformerLayer:
 
         # Residual
         o += input_embds
+        input_embds = None
 
         # FFN norm
         ffn_input = rmsnorm_forward(

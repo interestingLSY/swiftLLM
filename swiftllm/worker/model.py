@@ -203,3 +203,11 @@ class LlamaModel:
             torch.tensor(flattened_input_ids, dtype=torch.int32, device="cuda"),
             infer_state
         )
+
+    @torch.inference_mode()
+    def free_seqs_resources(self, seq_ids: list[int]):
+        """
+        Free the resources of the specified sequences.
+        """
+
+        self.block_manager.free_blocks_for_seqs(seq_ids)

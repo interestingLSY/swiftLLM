@@ -13,8 +13,8 @@ if __name__ == '__main__':
         use_dummy = False,
         
         block_size = 16,
-        max_blocks_per_seq = 1024,
-        num_blocks = 2048,
+        max_blocks_per_seq = 3072,
+        num_blocks = 1880,
         max_seqs_in_block_table = 128
     )
 
