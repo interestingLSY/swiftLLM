@@ -2,7 +2,7 @@ import torch
 
 from swiftllm.model_config import LlamaModelConfig
 from swiftllm.worker.weight import LlamaWeight
-from swiftllm.worker.kernels.rmsnorm import rmsnorm_forward
+from swiftllm.worker.kernels.rmsnorm import rmsnorm_inplace
 from swiftllm.worker.infer_state import LlamaInferState
 from swiftllm.worker.kernels.linear import linear
 
@@ -30,7 +30,7 @@ class LlamaPostLayer:
         last_input = torch.empty((infer_state.batch_size, self.model_config.hidden_size), device=input_embds.device, dtype=input_embds.dtype)
         last_input[:, :] = input_embds[last_token_indices, :]
         # Apply RMS-norm
-        last_input = rmsnorm_forward(
+        rmsnorm_inplace(
             last_input,
             self.weights.final_norm,
             self.model_config.rms_norm_eps

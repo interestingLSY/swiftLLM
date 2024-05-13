@@ -6,8 +6,8 @@ from swiftllm.worker.weight import LlamaTransformerLayerWeight
 from swiftllm.worker.infer_state import LlamaInferState
 
 from swiftllm.worker.kernels.linear import linear
-from swiftllm.worker.kernels.rmsnorm import rmsnorm_forward
-from swiftllm.worker.kernels.rotary_emb import rotary_emb_fwd
+from swiftllm.worker.kernels.rmsnorm import fused_add_rmsnorm_inplace
+from swiftllm.worker.kernels.rotary_emb import rotary_embedding_inplace
 from swiftllm.worker.kernels.paged_attn import paged_attention
 from swiftllm.worker.kernels.prefill_attn import prefill_attention
 from swiftllm.worker.kernels.kvcache_mgmt import store_kvcache
@@ -30,33 +30,39 @@ class LlamaTransformerLayer:
     
     def forward(
         self,
-        input_embds: torch.Tensor,    # [num_tokens, hidden_size]
+        input_embds: torch.Tensor,  # [num_tokens, hidden_size]
+        residual_buf: torch.Tensor, # [num_tokens, hidden_size]
         k_cache: torch.Tensor,
         v_cache: torch.Tensor,
         block_table: torch.Tensor,
         infer_state: LlamaInferState
     ) -> torch.Tensor:
-        # Attn norm
-        attn_input = rmsnorm_forward(
+        # (fused) Add last layer's residual, and perform RMSNorm
+        # Before: input_embds is the output of the last FFN block, and residual_buf
+        #         is the residual to be added to input_embds
+        # After: input_embds will be RMSNorm(input_embds + residual_buf), and
+        #        residual_buf will be input_embds + residual_buf (which will be
+        #        used as the residual after the attention block)
+        fused_add_rmsnorm_inplace(
             input_embds,
+            residual_buf,
             self.weight.attn_norm,
             self.model_config.rms_norm_eps
         )
 
         # Calculate QKV
-        q = linear(attn_input, self.weight.q_proj)		# [num_total_tokens, hidden_size]
-        k = linear(attn_input, self.weight.k_proj)		# [num_total_tokens, num_kv_heads*head_dim]
-        v = linear(attn_input, self.weight.v_proj)		# [num_total_tokens, num_kv_heads*head_dim]
+        q = linear(input_embds, self.weight.q_proj)		# [num_total_tokens, hidden_size]
+        k = linear(input_embds, self.weight.k_proj)		# [num_total_tokens, num_kv_heads*head_dim]
+        v = linear(input_embds, self.weight.v_proj)		# [num_total_tokens, num_kv_heads*head_dim]
         q = q.view(-1, self.model_config.num_q_heads,  self.model_config.head_dim)	# [num_total_tokens, num_q_heads, head_dim]
         k = k.view(-1, self.model_config.num_kv_heads, self.model_config.head_dim)	# [num_total_tokens, num_kv_heads, head_dim]
         v = v.view(-1, self.model_config.num_kv_heads, self.model_config.head_dim)	# [num_total_tokens, num_kv_heads, head_dim]
 
         # Rotary emb
-        rotary_emb_fwd(
+        rotary_embedding_inplace(
             q,
             k,
-            infer_state.position_cos,
-            infer_state.position_sin
+            infer_state
         )
 
         store_kvcache(
@@ -72,7 +78,7 @@ class LlamaTransformerLayer:
         store_kvcache_event.record()
 
         # Attention
-        o = torch.empty_like(input_embds)    # [num_total_tokens, hidden_size]
+        o = input_embds    # [num_total_tokens, hidden_size]
         if infer_state.num_prefill_seqs > 0:
             # import vllm_flash_attn
             # o[:infer_state.num_prefill_tokens, :] = vllm_flash_attn.flash_attn_varlen_func(
@@ -107,28 +113,16 @@ class LlamaTransformerLayer:
         # Output GEMM
         o = linear(o, self.weight.o_proj)	# [num_total_tokens, hidden_size]
 
-        # Residual
-        o += input_embds
-        
-        input_embds = None
+        # residual & FFN norm
+        fused_add_rmsnorm_inplace(o, residual_buf, self.weight.ffn_norm, self.model_config.rms_norm_eps)
         q = None
         k = None
-        v = None        
-
-        # FFN norm
-        ffn_input = rmsnorm_forward(
-            o,
-            self.weight.ffn_norm,
-            self.model_config.rms_norm_eps
-        )
+        v = None
 
         # FFN
-        up_gate_proj = linear(ffn_input, self.weight.up_gate_proj)
+        up_gate_proj = linear(o, self.weight.up_gate_proj)
         silu_and_mul_inplace(up_gate_proj)
         ffn_out = linear(up_gate_proj[:, :self.model_config.ffn_inter_dim], self.weight.down_proj)
-
-        # Residual
-        ffn_out += o
 
         return ffn_out
     

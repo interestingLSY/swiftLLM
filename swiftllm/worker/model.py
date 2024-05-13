@@ -101,14 +101,17 @@ class LlamaModel:
         """
         block_table_cuda = self.block_manager.block_table.to(device="cuda", non_blocking=True)
         input_embds = self.pre_layer.forward(input_ids)
+        residual_buf = torch.zeros_like(input_embds)
         for layer in self.transformer_layers:
             input_embds = layer.forward(
                 input_embds,
+                residual_buf,
                 self.k_cache,
                 self.v_cache,
                 block_table_cuda,
                 infer_state
             )
+        input_embds += residual_buf
         output_tokens = self.post_layer.forward(input_embds, infer_state)
         return output_tokens
     
