@@ -80,22 +80,24 @@ class LlamaTransformerLayer:
         # Attention
         o = input_embds    # [num_total_tokens, hidden_size]
         if infer_state.num_prefill_seqs > 0:
-            # import vllm_flash_attn
-            # o[:infer_state.num_prefill_tokens, :] = vllm_flash_attn.flash_attn_varlen_func(
-            #     q[:infer_state.num_prefill_tokens, :, :],
-            #     k[:infer_state.num_prefill_tokens, :, :],
-            #     v[:infer_state.num_prefill_tokens, :, :],
-            #     infer_state.prefill_seq_start_locs_with_end,
-            #     infer_state.prefill_seq_start_locs_with_end,
-            #     infer_state.max_prefill_len,
-            #     infer_state.max_prefill_len,
-            #     softmax_scale=infer_state.softmax_scale,
-            #     causal=True
-            # ).reshape(-1, self.model_config.hidden_size)
-            prefill_attention(
-                q, k, v, o[:infer_state.num_prefill_tokens, :],
-                self.model_config, self.engine_config, infer_state
-            )
+            # Here the performance of vLLM's flash attention is better than us,
+            # so use vllm_flash_attn
+            import vllm_flash_attn
+            o[:infer_state.num_prefill_tokens, :] = vllm_flash_attn.flash_attn_varlen_func(
+                q[:infer_state.num_prefill_tokens, :, :],
+                k[:infer_state.num_prefill_tokens, :, :],
+                v[:infer_state.num_prefill_tokens, :, :],
+                infer_state.prefill_seq_start_locs_with_end,
+                infer_state.prefill_seq_start_locs_with_end,
+                infer_state.max_prefill_len,
+                infer_state.max_prefill_len,
+                softmax_scale=infer_state.softmax_scale,
+                causal=True
+            ).reshape(-1, self.model_config.hidden_size)
+            # prefill_attention(
+            #     q, k, v, o[:infer_state.num_prefill_tokens, :],
+            #     self.model_config, self.engine_config, infer_state
+            # )
         if infer_state.num_decoding_seqs > 0:
             with torch.cuda.stream(self.decoding_piggyback_stream):
                 torch.cuda.current_stream().wait_event(store_kvcache_event)
