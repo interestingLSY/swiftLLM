@@ -15,7 +15,12 @@ if __name__ == '__main__':
         block_size = 16,
         max_blocks_per_seq = 3072,
         num_blocks = 1880,
-        max_seqs_in_block_table = 128
+        num_cpu_blocks = 0,
+        max_seqs_in_block_table = 128,
+
+        # The following are not used in the offline example
+        max_batch_size = 0,
+        max_tokens_in_batch = 0
     )
 
     start_time = time.perf_counter()

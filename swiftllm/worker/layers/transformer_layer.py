@@ -35,7 +35,7 @@ class LlamaTransformerLayer:
         k_cache: torch.Tensor,
         v_cache: torch.Tensor,
         block_table: torch.Tensor,
-        infer_state: LlamaInferState
+        infer_state: LlamaInferState,
     ) -> torch.Tensor:
         # (fused) Add last layer's residual, and perform RMSNorm
         # Before: input_embds is the output of the last FFN block, and residual_buf
@@ -65,15 +65,16 @@ class LlamaTransformerLayer:
             infer_state
         )
 
-        store_kvcache(
-            k, v,
-            k_cache, v_cache,
-            block_table,
-            self.model_config,
-            self.engine_config,
-            infer_state,
-            self.layer_id
-        )
+        if not infer_state.ignore_kvcache:
+            store_kvcache(
+                k, v,
+                k_cache, v_cache,
+                block_table,
+                self.model_config,
+                self.engine_config,
+                infer_state,
+                self.layer_id
+            )
         store_kvcache_event = torch.cuda.Event()
         store_kvcache_event.record()
 
@@ -99,6 +100,7 @@ class LlamaTransformerLayer:
             #     self.model_config, self.engine_config, infer_state
             # )
         if infer_state.num_decoding_seqs > 0:
+            assert not infer_state.ignore_kvcache
             with torch.cuda.stream(self.decoding_piggyback_stream):
                 torch.cuda.current_stream().wait_event(store_kvcache_event)
                 paged_attention(

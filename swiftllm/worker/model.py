@@ -1,14 +1,13 @@
-import os, json
 import itertools
+import math
 
 import torch
-from transformers import AutoTokenizer
 
 from swiftllm.engine_config import EngineConfig
 from swiftllm.model_config import LlamaModelConfig
 from swiftllm.worker.weight import load_weights
 from swiftllm.worker.block_manager import BlockManager
-from swiftllm.utils import cdiv
+from swiftllm.utils import GB
 
 from .layers.pre_layer import LlamaPreLayer
 from .layers.transformer_layer import LlamaTransformerLayer
@@ -16,6 +15,19 @@ from .layers.post_layer import LlamaPostLayer
 from .infer_state import LlamaInferState
 
 class LlamaModel:
+    """
+    LlamaModel - A Llama model that can be used for inference.
+
+    This class also acts as a "worker" that resides on a particular GPU, waiting
+    for the control plane (the scheduler) to send commands.
+
+    To initialize, please:
+    - call __init__()
+    - call load_weights()
+    - call profile_num_blocks() on one worker
+    - call init_kvcache_and_swap()
+    """
+
     @torch.inference_mode()
     def __init__(
         self,
@@ -27,39 +39,24 @@ class LlamaModel:
         self.engine_config = engine_config
 
         # Load model config
-        with open(os.path.join(engine_config.model_path, "config.json"), "r", encoding="utf-8") as f:
-            self.model_config = json.loads(f.read())
-        self.model_config = LlamaModelConfig(self.model_config)
-
+        self.model_config = LlamaModelConfig.load_from_model_path(engine_config.model_path)
+        
+    @torch.inference_mode()
+    def load_weights(self):
+        """
+        Load weights and initialize layers
+        """
+        # pylint: disable=attribute-defined-outside-init
         # Load weights
         self.weight = load_weights(
             self.model_config,
             torch.float16,
-            engine_config.model_path,
-            engine_config.use_dummy
+            self.engine_config.model_path,
+            self.engine_config.use_dummy
         )
 
         # Initialize rotary embeddings
         self._init_to_get_rotary()
-
-        # Initialize KV Cache
-        kvcache_shape = (
-            self.engine_config.num_blocks,
-            self.model_config.num_layers,
-            self.model_config.num_kv_heads,
-            self.engine_config.block_size,
-            self.model_config.head_dim
-        )
-        self.k_cache = torch.empty(kvcache_shape, dtype=torch.float16, device="cuda")
-        self.v_cache = torch.empty(kvcache_shape, dtype=torch.float16, device="cuda")
-
-        # Initialize block manager
-        self.block_manager = BlockManager(
-            self.engine_config.num_blocks,
-            self.engine_config.max_seqs_in_block_table,
-            self.engine_config.max_blocks_per_seq,
-            self.engine_config.block_size
-        )
 
         # Initialize layers
         decoding_piggyback_stream = torch.cuda.Stream()
@@ -75,9 +72,81 @@ class LlamaModel:
             for layer_id in range(self.model_config.num_layers)
         ]
         self.post_layer = LlamaPostLayer(self.model_config, self.weight)
+
+    @torch.inference_mode()
+    def profile_num_blocks(self) -> int:
+        """
+        Profiler the number of GPU blocks
+
+        We run a forged prefill batch with the maximum number of tokens and
+        sequences, record the peak memory usage, and infer the number of blocks
+        that can be allocated.
+        """
         torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+
+        # Synthesis a prefill batch
+        num_tokens = self.engine_config.max_tokens_in_batch
+        batch_size = self.engine_config.max_batch_size
+        input_lens = [num_tokens // batch_size] * batch_size
+        input_lens[-1] += num_tokens % batch_size
+        input_ids = [
+            [0 for _ in range(input_len)]
+            for input_len in input_lens
+        ]
+        seq_ids = list(range(batch_size))
+        self.k_cache = self.v_cache = None
+        _ = self.forward(input_ids, seq_ids, [], ignore_kvcache=True)
+        torch.cuda.synchronize()
+
+        # peak_memory = torch.cuda.max_memory_allocated()
+        # total_memory = torch.cuda.get_device_properties(0).total_memory
+        free_memory, total_memory = torch.cuda.mem_get_info()
+        peak_memory = total_memory - free_memory
+        print(f"[Model.profile] GPU total memory: {total_memory/GB:.2f} GB, runtime peak memory: {peak_memory/GB:.2f} GB")
+        block_size_bytes = self.engine_config.block_size * self.model_config.get_kvslot_size()
+        num_gpu_blocks = math.floor((total_memory*self.engine_config.gpu_mem_utilization - peak_memory) / block_size_bytes)
+
+        torch.cuda.empty_cache()
+        return num_gpu_blocks
+    
+    @torch.inference_mode()
+    def init_kvcache_and_swap(self, num_blocks: int):
+        # pylint: disable=attribute-defined-outside-init
+        self.num_blocks = num_blocks
+
+        # Initialize KV cache
+        kvcache_shape = (
+            self.num_blocks,
+            self.model_config.num_layers,
+            self.model_config.num_kv_heads,
+            self.engine_config.block_size,
+            self.model_config.head_dim
+        )
+        self.k_cache = torch.empty(kvcache_shape, dtype=torch.float16, device="cuda")
+        self.v_cache = torch.empty(kvcache_shape, dtype=torch.float16, device="cuda")
+
+        # Initialize KV swap space
+        kvswap_shape = (
+            self.engine_config.num_cpu_blocks,
+            self.model_config.num_layers,
+            self.model_config.num_kv_heads,
+            self.engine_config.block_size,
+            self.model_config.head_dim
+        )
+        self.k_swap = torch.empty(kvswap_shape, dtype=torch.float16, device="cpu")
+        self.v_swap = torch.empty(kvswap_shape, dtype=torch.float16, device="cpu")
+
+        # Initialize block manager
+        self.block_manager = BlockManager(
+            self.num_blocks,
+            self.engine_config.max_seqs_in_block_table,
+            self.engine_config.max_blocks_per_seq,
+            self.engine_config.block_size
+        )
 
     def _init_to_get_rotary(self):
+        # pylint: disable=attribute-defined-outside-init
         rope_scaling_factor = self.model_config.rope_scaling
         base = self.model_config.rope_theta
         max_position_embeddings = self.model_config.max_position_embeddings
@@ -94,12 +163,12 @@ class LlamaModel:
     def _forward(
         self,
         input_ids: torch.Tensor,    # [total_token_num]
-        infer_state: LlamaInferState
+        infer_state: LlamaInferState,
     ) -> torch.Tensor:
         """
         Run a forward pass of the LlamaModel.
         """
-        block_table_cuda = self.block_manager.block_table.to(device="cuda", non_blocking=True)
+        block_table_cuda = self.block_manager.block_table.to(device="cuda", non_blocking=True) if not infer_state.ignore_kvcache else None
         input_embds = self.pre_layer.forward(input_ids)
         residual_buf = torch.zeros_like(input_embds)
         for layer in self.transformer_layers:
@@ -109,7 +178,7 @@ class LlamaModel:
                 self.k_cache,
                 self.v_cache,
                 block_table_cuda,
-                infer_state
+                infer_state,
             )
         input_embds += residual_buf
         output_tokens = self.post_layer.forward(input_embds, infer_state)
@@ -121,7 +190,7 @@ class LlamaModel:
         input_ids: list[list[int]], # [batch_size, *]
         seq_ids: list[int],     # [batch_size]
         decoding_seq_lens_list: list[int], # [num_decoding_seqs]
-        num_prefill_seqs: int,
+        ignore_kvcache: bool = False,   # Skip actions related to kv cache, useful when profiling the number of kv blocks
     ) -> list[int]:
         """
         Run a forward pass of the LlamaModel.
@@ -133,6 +202,7 @@ class LlamaModel:
         remotely via Ray.
         """
 
+        num_prefill_seqs = len(input_ids) - len(decoding_seq_lens_list)
         flattened_input_ids = list(itertools.chain(*input_ids))
         seq_lengths = [len(seq) for seq in input_ids[:num_prefill_seqs]] + decoding_seq_lens_list
 
@@ -160,10 +230,11 @@ class LlamaModel:
             decoding_seq_lens - 1
         ), dim=0)
 
-        self.block_manager.allocate_blocks_for_seqs(
-            torch.tensor(seq_ids, dtype=torch.int32, device="cpu"),
-            torch.tensor(seq_lengths, dtype=torch.int32, device="cpu")
-        )
+        if not ignore_kvcache:
+            self.block_manager.allocate_blocks_for_seqs(
+                torch.tensor(seq_ids, dtype=torch.int32, device="cpu"),
+                torch.tensor(seq_lengths, dtype=torch.int32, device="cpu")
+            )
 
         # Select the seq_block_size
         # In paged attention phase 1, the grid shape is (num_decoding_seqs, num_kv_heads, cdiv(max_decoding_len, seq_block_size))
@@ -202,12 +273,14 @@ class LlamaModel:
 
             position_cos = self._cos_cached[position_indices],
             position_sin = self._sin_cached[position_indices],
+
+            ignore_kvcache = ignore_kvcache
         )
 
         return self._forward(
             torch.tensor(flattened_input_ids, dtype=torch.int32, device="cuda"),
             infer_state
-        )
+        ).tolist()
 
     @torch.inference_mode()
     def free_seqs_resources(self, seq_ids: list[int]):

@@ -1,3 +1,7 @@
+import os
+import json
+import torch
+
 class LlamaModelConfig:
     """
     The configuration of a LLaMA model (including LLaMA 1/2/3).
@@ -28,4 +32,15 @@ class LlamaModelConfig:
         if self.rope_scaling is None:
             self.rope_scaling = 1.0
         assert model_config["hidden_act"] == "silu"
-        
+
+    def get_kvslot_size(self, dtype: torch.dtype = torch.float16) -> int:
+        """
+        Get the size of one kv slot (the kv cache of one token) (in bytes)
+        """
+        return (2 * self.num_layers * self.num_kv_heads * self.head_dim) * dtype.itemsize
+    
+    @staticmethod
+    def load_from_model_path(model_path: str) -> "LlamaModelConfig":
+        with open(os.path.join(model_path, "config.json"), "r", encoding="utf-8") as f:
+            model_config_dict = json.loads(f.read())
+        return LlamaModelConfig(model_config_dict)
