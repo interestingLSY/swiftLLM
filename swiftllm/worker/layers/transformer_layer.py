@@ -1,4 +1,5 @@
 import torch
+import vllm_flash_attn
 
 from swiftllm.model_config import LlamaModelConfig
 from swiftllm.engine_config import EngineConfig
@@ -9,7 +10,6 @@ from swiftllm.worker.kernels.linear import linear
 from swiftllm.worker.kernels.rmsnorm import fused_add_rmsnorm_inplace
 from swiftllm.worker.kernels.rotary_emb import rotary_embedding_inplace
 from swiftllm.worker.kernels.paged_attn import paged_attention
-from swiftllm.worker.kernels.prefill_attn import prefill_attention
 from swiftllm.worker.kernels.kvcache_mgmt import store_kvcache
 from swiftllm.worker.kernels.silu_and_mul import silu_and_mul_inplace
 
@@ -83,7 +83,6 @@ class LlamaTransformerLayer:
         if infer_state.num_prefill_seqs > 0:
             # Here the performance of vLLM's flash attention is better than us,
             # so use vllm_flash_attn
-            import vllm_flash_attn
             o[:infer_state.num_prefill_tokens, :] = vllm_flash_attn.flash_attn_varlen_func(
                 q[:infer_state.num_prefill_tokens, :, :],
                 k[:infer_state.num_prefill_tokens, :, :],
