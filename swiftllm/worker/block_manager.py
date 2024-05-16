@@ -1,58 +1,72 @@
 import torch
 
+from .kernels.block_mgmt import set_block_table_and_num_seq_alloc_blocks, unset_block_table_and_num_seq_alloc_blocks
+
 class BlockManager:
+    """
+    BlockManager - Manage the block table and free blocks on GPU
+
+    This manager records the mapping from (sequence ID, block index) to block 
+    ID (which we call `block_table`), and provides methods to allocate and free
+    blocks.
+
+    All tables (the block table, the `num_seq_allocated_blocks`, and the free block
+    list) are all maintained on the GPU, so that we can leverage custom Triton
+    kernels for fast operations.
+    """
+
     def __init__(self, num_blocks: int, max_seqs_in_block_table: int, max_blocks_per_seq: int, block_size: int):
-        self.free_blocks_list = list(range(0, num_blocks))
-        self.free_blocks_list.reverse()
+        self.num_free_blocks = num_blocks
+        self.num_blocks = num_blocks
+        self.block_size = block_size
+
+        # seq_id |-> number of blocks allocated for this sequence
+        self.num_seq_allocated_blocks = torch.zeros(
+            (max_seqs_in_block_table,),
+            dtype=torch.int32,
+            device="cuda"
+        )
+        # (seq_id, block_index) |-> block_id
         self.block_table = torch.empty(
             (max_seqs_in_block_table, max_blocks_per_seq),
             dtype=torch.int32,
-            device="cpu",
-            pin_memory=True
+            device="cuda",
         )
-        self.num_blocks = num_blocks
-        self.allocated_lens = torch.zeros((max_seqs_in_block_table,), dtype=torch.int32, device="cpu", pin_memory=True)
-        self.block_size = block_size
+        # block_id |-> whether this block is free or not
+        self.is_block_free = torch.ones(
+            (num_blocks,),
+            dtype=torch.bool,
+            device="cuda"
+        )
     
-    def _allocate_block(self) -> int:
-        if not self.free_blocks_list:
-            raise RuntimeError("No free blocks available")
-        return self.free_blocks_list.pop()
+    def _allocate_blocks(self, num_blocks: int) -> torch.Tensor:
+        """
+        Allocate the requested number of blocks, update relevant status, and
+        return the block IDs.
+        """
+        if num_blocks > self.num_free_blocks:
+            raise RuntimeError(f"No enough free blocks available ({self.num_blocks} in total, {self.num_free_blocks} free, {num_blocks} requested)")
+        selected_blocks = torch.nonzero(self.is_block_free)[:num_blocks].view(-1)
+        self.num_free_blocks -= num_blocks
+        self.is_block_free[selected_blocks] = False
+        return selected_blocks
     
-    def _allocate_blocks(self, num_blocks: int) -> list[int]:
-        if num_blocks > len(self.free_blocks_list):
-            raise RuntimeError(f"No enough free blocks available ({self.num_blocks} in total, {len(self.free_blocks_list)} free, {num_blocks} requested)")
-        if num_blocks == 0:
-            return []
-        blocks = self.free_blocks_list[-num_blocks:]
-        self.free_blocks_list = self.free_blocks_list[:-num_blocks]
-        return blocks
-    
-    def _free_block(self, block_id: int):
-        self.free_blocks_list.append(block_id)
-    
-    def _free_blocks(self, block_ids: list[int]):
-        self.free_blocks_list.extend(block_ids)
+    def _free_blocks(self, block_ids: torch.Tensor):
+        """
+        Free the specified blocks, and update relevant status.
+        """
+        self.num_free_blocks += len(block_ids)
+        self.is_block_free[block_ids] = True
     
     def allocate_blocks_for_seqs(self, seq_ids: torch.Tensor, target_lens: torch.Tensor):
         target_num_blocks = (target_lens + (self.block_size-1)) // self.block_size
-        assert (self.allocated_lens[seq_ids] <= target_num_blocks).all(), f"Logic error: Some sequences have more blocks already allocated than needed. seq_ids: {seq_ids}, target_lens: {target_lens}, target_num_blocks: {target_num_blocks}, self.allocated_lens: {self.allocated_lens}"
-        block_needed = target_num_blocks - self.allocated_lens[seq_ids]
-        blocks = self._allocate_blocks(torch.sum(block_needed))
-        blocks = torch.tensor(blocks, dtype=torch.int32, device="cpu")
-        for i, seq_id in enumerate(seq_ids):
-            cur_num_blocks = block_needed[i].item()
-            if cur_num_blocks == 0:
-                continue
-            seq_block_ids = blocks[-cur_num_blocks:]
-            self.block_table[seq_id, self.allocated_lens[seq_id]: self.allocated_lens[seq_id]+cur_num_blocks] = seq_block_ids
-            self.allocated_lens[seq_id] += block_needed[i]
-            blocks = blocks[:-cur_num_blocks]
-        assert len(blocks) == 0
+        assert (self.num_seq_allocated_blocks[seq_ids] <= target_num_blocks).all(), \
+            f"Logic error: Some sequences have more blocks already allocated than needed. seq_ids: {seq_ids}, target_lens: {target_lens}, target_num_blocks: {target_num_blocks}, self.num_seq_allocated_blocks: {self.num_seq_allocated_blocks}"
+        block_needed = target_num_blocks - self.num_seq_allocated_blocks[seq_ids]
+        new_blocks = self._allocate_blocks(torch.sum(block_needed))
+
+        set_block_table_and_num_seq_alloc_blocks(self.num_seq_allocated_blocks, self.block_table, new_blocks, seq_ids, block_needed)
         
-    def free_blocks_for_seqs(self, seq_ids: list[int]):
-        for seq_id in seq_ids:
-            block_ids = self.block_table[seq_id][:self.allocated_lens[seq_id]]
-            self._free_blocks(block_ids.tolist())
-            self.allocated_lens[seq_id] = 0
-            
+    def free_blocks_for_seqs(self, seq_ids: torch.Tensor):
+        self.num_free_blocks += torch.sum(self.num_seq_allocated_blocks[seq_ids])
+        unset_block_table_and_num_seq_alloc_blocks(self.num_seq_allocated_blocks, self.block_table, seq_ids, self.is_block_free)

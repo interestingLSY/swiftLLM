@@ -170,7 +170,6 @@ class LlamaModel:
         """
         Run a forward pass of the LlamaModel.
         """
-        block_table_cuda = self.block_manager.block_table.to(device="cuda", non_blocking=True) if not infer_state.ignore_kvcache else None
         input_embds = self.pre_layer.forward(input_ids)
         residual_buf = torch.zeros_like(input_embds)
         for layer in self.transformer_layers:
@@ -179,7 +178,7 @@ class LlamaModel:
                 residual_buf,
                 self.k_cache,
                 self.v_cache,
-                block_table_cuda,
+                self.block_manager.block_table,
                 infer_state,
             )
         input_embds += residual_buf
@@ -189,8 +188,8 @@ class LlamaModel:
     @torch.inference_mode()
     def forward(
         self,
-        input_ids: list[list[int]], # [batch_size, *]
-        seq_ids: list[int],     # [batch_size]
+        input_ids_list: list[list[int]], # [batch_size, *]
+        seq_ids_list: list[int],     # [batch_size]
         decoding_seq_lens_list: list[int], # [num_decoding_seqs]
         ignore_kvcache: bool = False,   # Skip actions related to kv cache, useful when profiling the number of kv blocks
     ) -> list[int]:
@@ -203,14 +202,17 @@ class LlamaModel:
         This function is intended to be called by the server.
         """
 
-        num_prefill_seqs = len(input_ids) - len(decoding_seq_lens_list)
-        flattened_input_ids = list(itertools.chain(*input_ids))
-        seq_lengths = [len(seq) for seq in input_ids[:num_prefill_seqs]] + decoding_seq_lens_list
+        num_prefill_seqs = len(input_ids_list) - len(decoding_seq_lens_list)
+        flattened_input_ids = list(itertools.chain(*input_ids_list))
+        seq_lengths_list = [len(seq) for seq in input_ids_list[:num_prefill_seqs]] + decoding_seq_lens_list
 
-        batch_size = len(input_ids)
+        seq_ids = torch.tensor(seq_ids_list, dtype=torch.int32, device="cuda")
+        seq_lengths = torch.tensor(seq_lengths_list, dtype=torch.int32, device="cuda")
+
+        batch_size = len(input_ids_list)
         num_tokens = len(flattened_input_ids)
 
-        prefill_seq_lens_list = seq_lengths[:num_prefill_seqs]
+        prefill_seq_lens_list = seq_lengths_list[:num_prefill_seqs]
         prefill_seq_lens = torch.tensor(prefill_seq_lens_list, dtype=torch.int32, device="cuda")
         prefill_start_locs = torch.cumsum(prefill_seq_lens, dim=0, dtype=torch.int32) - prefill_seq_lens
         max_prefill_len = max(prefill_seq_lens_list) if prefill_seq_lens_list else 0
@@ -233,8 +235,8 @@ class LlamaModel:
 
         if not ignore_kvcache:
             self.block_manager.allocate_blocks_for_seqs(
-                torch.tensor(seq_ids, dtype=torch.int32, device="cpu"),
-                torch.tensor(seq_lengths, dtype=torch.int32, device="cpu")
+                seq_ids,
+                seq_lengths
             )
 
         # Select the seq_block_size
@@ -252,7 +254,7 @@ class LlamaModel:
             batch_size = batch_size,
             num_tokens = num_tokens,
 
-            seq_ids = torch.tensor(seq_ids, dtype=torch.int32, device="cuda"),
+            seq_ids = seq_ids,
             softmax_scale = self.model_config.head_dim ** -0.5,
 
             num_prefill_seqs = num_prefill_seqs,
@@ -284,9 +286,9 @@ class LlamaModel:
         ).tolist()
 
     @torch.inference_mode()
-    def free_seqs_resources(self, seq_ids: list[int]):
+    def free_seqs_resources(self, seq_ids_list: list[int]):
         """
         Free the resources of the specified sequences.
         """
-
+        seq_ids = torch.tensor(seq_ids_list, dtype=torch.int32, device="cuda")
         self.block_manager.free_blocks_for_seqs(seq_ids)
