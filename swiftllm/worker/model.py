@@ -95,7 +95,7 @@ class LlamaModel:
             for input_len in input_lens
         ]
         seq_ids = list(range(batch_size))
-        self.k_cache = self.v_cache = None
+        self.k_cache = self.v_cache = None # pylint: disable=attribute-defined-outside-init
         _ = self.forward(input_ids, seq_ids, [], ignore_kvcache=True)
         torch.cuda.synchronize()
 
@@ -123,8 +123,10 @@ class LlamaModel:
             self.engine_config.block_size,
             self.model_config.head_dim
         )
-        self.k_cache = torch.empty(kvcache_shape, dtype=torch.float16, device="cuda")
-        self.v_cache = torch.empty(kvcache_shape, dtype=torch.float16, device="cuda")
+        # Here we use torch.zeros instead of torch.empty, since that torch.empty
+        # has the possibility to contain NaNs, which will cause the model to output NaNs.
+        self.k_cache = torch.zeros(kvcache_shape, dtype=torch.float16, device="cuda")
+        self.v_cache = torch.zeros(kvcache_shape, dtype=torch.float16, device="cuda")
 
         # Initialize KV swap space
         kvswap_shape = (
@@ -134,8 +136,8 @@ class LlamaModel:
             self.engine_config.block_size,
             self.model_config.head_dim
         )
-        self.k_swap = torch.empty(kvswap_shape, dtype=torch.float16, device="cpu")
-        self.v_swap = torch.empty(kvswap_shape, dtype=torch.float16, device="cpu")
+        self.k_swap = torch.zeros(kvswap_shape, dtype=torch.float16, device="cpu")
+        self.v_swap = torch.zeros(kvswap_shape, dtype=torch.float16, device="cpu")
 
         # Initialize block manager
         self.block_manager = BlockManager(
@@ -198,8 +200,7 @@ class LlamaModel:
         This function is a wrapper of the `_forward` function. It prepares the infer_state
         and calls the `_forward` function.
 
-        This function is intended to be called by the server, i.e. to be called
-        remotely via Ray.
+        This function is intended to be called by the server.
         """
 
         num_prefill_seqs = len(input_ids) - len(decoding_seq_lens_list)
