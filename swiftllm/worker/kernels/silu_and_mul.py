@@ -29,6 +29,6 @@ def silu_and_mul_inplace(
     num_tokens = x.shape[0]
     ffn_inter_dim = x.shape[1] // 2
 
-    block_size = 512
+    block_size = 256
     assert ffn_inter_dim % block_size == 0
     _fwd_silu_and_mul[(num_tokens, ffn_inter_dim//block_size)](x, ffn_inter_dim, block_size)

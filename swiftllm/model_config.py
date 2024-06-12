@@ -19,7 +19,7 @@ class LlamaModelConfig:
         assert model_config["model_type"] == "llama"
         self.num_layers = model_config["num_hidden_layers"]
         self.num_q_heads = model_config["num_attention_heads"]
-        self.num_kv_heads = model_config["num_key_value_heads"]
+        self.num_kv_heads = model_config.get("num_key_value_heads", self.num_q_heads)
         self.hidden_size = model_config["hidden_size"]
         self.head_dim = self.hidden_size // self.num_q_heads
         self.vocab_size = model_config["vocab_size"]

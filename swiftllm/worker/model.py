@@ -40,13 +40,29 @@ class LlamaModel:
 
         # Load model config
         self.model_config = LlamaModelConfig.load_from_model_path(engine_config.model_path)
+
+        # Weight and RoPE cache
+        self.weight = None
+        self._cos_cached = self._sin_cached = None
+
+        # Layers
+        self.pre_layer = None
+        self.transformer_layers = None
+        self.post_layer = None
+
+        # KV Cache
+        self.num_blocks = None
+        self.k_cache = self.v_cache = None
+        self.k_swap = self.v_swap = None
+
+        # Block manager
+        self.block_manager = None
         
     @torch.inference_mode()
     def load_weights(self):
         """
         Load weights and initialize layers
         """
-        # pylint: disable=attribute-defined-outside-init
         # Load weights
         self.weight = load_weights(
             self.model_config,
@@ -112,7 +128,6 @@ class LlamaModel:
     
     @torch.inference_mode()
     def init_kvcache_and_swap(self, num_blocks: int):
-        # pylint: disable=attribute-defined-outside-init
         self.num_blocks = num_blocks
 
         # Initialize KV cache
@@ -148,7 +163,6 @@ class LlamaModel:
         )
 
     def _init_to_get_rotary(self):
-        # pylint: disable=attribute-defined-outside-init
         rope_scaling_factor = self.model_config.rope_scaling
         base = self.model_config.rope_theta
         max_position_embeddings = self.model_config.max_position_embeddings
@@ -178,7 +192,7 @@ class LlamaModel:
                 residual_buf,
                 self.k_cache,
                 self.v_cache,
-                self.block_manager.block_table,
+                self.block_manager.block_table if not infer_state.ignore_kvcache else None,
                 infer_state,
             )
         input_embds += residual_buf
