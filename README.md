@@ -42,4 +42,10 @@ Despite being tiny (Tiny ones can be adorable too!), SwiftLLM has no compromise 
 
 ### Offline Inference
 
-The first scenario is offline inference, where we feed the model with a batch of inputs and let it generate one output token (equivelant to one "forward" operation).
+The first scenario is offline inference, where we feed the model with a batch of inputs and let it generate one output token (equivelant to one "forward" operation). Here we use LLaMA-3 7B model with NVIDIA A100 80G PCIE / RTX 4090 GPU under FP16 precision. The results are shown below (lower is better):
+
+![offline-llama-3-7b-a100](https://raw.githubusercontent.com/interestingLSY/swiftLLM/main/docs/assets/offline-llama-3-7b-a100.png)
+
+![offline-llama-3-7b-4090](https://raw.githubusercontent.com/interestingLSY/swiftLLM/main/docs/assets/offline-llama-3-7b-4090.png)
+
+It can be seen that SwiftLLM can achieve equivalent performance (or even outperform) to vLLM under the same settings.
