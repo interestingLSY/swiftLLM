@@ -240,10 +240,20 @@ class LlamaModel:
             )
 
         # Select the seq_block_size
+        #
+        # Here we use a simple heuristic:
+        #
         # In paged attention phase 1, the grid shape is (num_decoding_seqs, num_kv_heads, cdiv(max_decoding_len, seq_block_size))
-        # and among the grid, num_kv_heads * sum(cdiv(decoding_seq_lens, seq_block_size)) blocks are useful.
+        # and among these blocks, num_kv_heads * sum(cdiv(decoding_seq_lens, seq_block_size)) blocks are useful.
         # Thus we set seq_block_size to be the largest integer that satisfies
         #      num_kv_heads * sum(cdiv(decoding_seq_lens, seq_block_size)) >= 1024
+        # to fully utilize the GPU. Here 1024 is a magic number (since most high-end
+        # GPUs have ~128 SMs, so ~512 SMSPs. Since the decoding-stage attention
+        # is mostly a memory-bound operation, I think 1024 is a reasonable number.)
+        #
+        # In practice, we use `decoding_seq_lens_sum/seq_block_size` to approximate
+        # sum(cdiv(decoding_seq_lens, seq_block_size))
+
         seq_block_size = 2048
         decoding_seq_lens_sum = sum(decoding_seq_lens_list)
         while self.model_config.num_kv_heads*(decoding_seq_lens_sum/seq_block_size) < 1024 and seq_block_size//2 >= 64 and \

@@ -12,7 +12,7 @@ def _fwd_set_block_table_and_num_seq_alloc_blocks_kernel(
     block_needed_cumsum: torch.Tensor,	# [batch_size]
     max_blocks_per_seq: tl.constexpr
 ):
-    # grid shape: [batch_sssize]
+    # grid shape: [batch_size]
     my_batch_id = tl.program_id(0)
     my_seq_id = tl.load(seq_ids + my_batch_id).to(tl.int64)
     my_block_needed = tl.load(block_needed + my_batch_id)
