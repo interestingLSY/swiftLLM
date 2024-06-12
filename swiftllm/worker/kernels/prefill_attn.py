@@ -119,9 +119,8 @@ def prefill_attention(
     BLOCK_Q = min(BLOCK_Q, triton.next_power_of_2(max(infer_state.max_prefill_len, 16)))
     BLOCK_K = min(BLOCK_K, triton.next_power_of_2(max(infer_state.max_prefill_len, 16)))
 
-    # scale sm_scale by log_2(e) and use
-    # 2^x instead of exp in the loop because CSE and LICM
-    # don't work as expected with `exp` in the loop
+    # Please refer to `paged_attn.py` for the reason of multiplying softmax_scale
+    # by log2(e)
     softmax_scale2 = infer_state.softmax_scale * 1.442695040888963
 
     assert BLOCK_Q % BLOCK_K == 0

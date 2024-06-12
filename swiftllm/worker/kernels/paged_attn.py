@@ -184,7 +184,15 @@ def paged_attention(
         mid_o, mid_o_logexpsum,
         q, k_cache, v_cache,
         block_table,
-        infer_state.softmax_scale * 1.442695040888963,  # Since we are going to use log2
+
+        # Here we multiply softmax_scale by log2(e) and use `exp2` instead of
+        # `exp` because of two reasons:
+        # 1. Up to 12 Jun 2024, all NVIDIA GPUs does not have a `exp` instruction
+        #    in PTX. When calculating `exp`, they multiply the input by log2(e)
+        #    and use `exp2` instead.
+        # 2. Some optimizations are disabled while using `exp` in a loop, see
+        #    https://github.com/triton-lang/triton/issues/2961
+        infer_state.softmax_scale * 1.442695040888963,
         infer_state.decoding_seq_lens,
         infer_state.seq_ids[infer_state.num_prefill_seqs:],
         infer_state.num_seq_blocks,
