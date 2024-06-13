@@ -228,7 +228,6 @@ def load_weights(
             # We add `mmap=True` to avoid loading the entire file into memory.
             opened_files = {}
             def weight_getter_real(item: RegisteredWeightItem):
-                print("loading", item)
                 file_name = pytorch_index[item.key] if pytorch_index is not None else pytorch_filename
                 file_path = os.path.join(model_path, file_name)
                 if file_path not in opened_files:
