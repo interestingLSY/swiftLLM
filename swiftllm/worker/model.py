@@ -119,9 +119,12 @@ class LlamaModel:
         # total_memory = torch.cuda.get_device_properties(0).total_memory
         free_memory, total_memory = torch.cuda.mem_get_info()
         peak_memory = total_memory - free_memory
+        useable_memory = total_memory*self.engine_config.gpu_mem_utilization
         print(f"[Model.profile] GPU total memory: {total_memory/GB:.2f} GB, runtime peak memory: {peak_memory/GB:.2f} GB")
+        if useable_memory < peak_memory:
+            raise RuntimeError(f"Peak memory {peak_memory/GB:.2f} GB exceeds usable memory {useable_memory/GB:.2f} GB ({total_memory/GB:.2f} GB * {self.engine_config.gpu_mem_utilization})")
         block_size_bytes = self.engine_config.block_size * self.model_config.get_kvslot_size()
-        num_gpu_blocks = math.floor((total_memory*self.engine_config.gpu_mem_utilization - peak_memory) / block_size_bytes)
+        num_gpu_blocks = math.floor((useable_memory - peak_memory) / block_size_bytes)
 
         torch.cuda.empty_cache()
         return num_gpu_blocks
