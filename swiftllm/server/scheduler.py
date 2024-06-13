@@ -13,6 +13,10 @@ class RequestIdManager:
         # Id should be in range [0, max_id)
         self.max_id = max_id
         self.available_ids = list(range(max_id))
+        self.available_ids.reverse()    # This reverse is not necessary. We have
+                                        # this for more convinent debugging since
+                                        # we always pop from the end and after
+                                        # reversing, smaller ids are popped first
     
     def get_id(self) -> int:
         if not self.available_ids:
@@ -91,6 +95,7 @@ class Scheduler:
                 return cur_batch, [], []
         
         # Try to launch a decoding batch
+        # TODO Optimize this `sum`
         self.num_decoding_gpu_blocks = sum(self._get_block_needed(req) for req in self.running_q)
         newly_swapped_out = []
         while len(self.running_q) > self.engine_config.max_batch_size or \
@@ -108,10 +113,11 @@ class Scheduler:
             # No swap-out triggered, try to swap in some requests if possible
             while self.swapped_q:
                 cur_seq = self.swapped_q[0]
+                num_cur_seq_blocks = self._get_block_needed(cur_seq)
                 if len(self.running_q) + 1 <= self.engine_config.max_batch_size and \
-                   self.num_decoding_gpu_blocks + self._get_block_needed(cur_seq) <= self.num_gpu_blocks:
+                   self.num_decoding_gpu_blocks + num_cur_seq_blocks <= self.num_gpu_blocks:
                     self.running_q.append(cur_seq)
-                    self.num_decoding_gpu_blocks += self._get_block_needed(cur_seq)
+                    self.num_decoding_gpu_blocks += num_cur_seq_blocks
                     self.swapped_q.popleft()
                     newly_swapped_in.append(cur_seq)
                 else:
