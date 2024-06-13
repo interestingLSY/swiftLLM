@@ -36,16 +36,27 @@ To keep the codebase tiny, we will not support the following features. If you wa
 - Sampling methods other than greedy sampling
 - Hardware supports other than NVIDIA GPU (but it should be easy to migrate to other hardwares as long as OpenAI Triton supports them)
 
+Remember that SwiftLLM is NOT an all-in-one solution for production. It's advised to think it as a "foundation" for your research project, and you may need to implement some features by yourself.
+
+## Architecture
 ## Performance
 
 Despite being tiny (Tiny ones can be adorable too!), SwiftLLM has no compromise on performance. We have evaluated SwiftLLM on several scenarios, and demonstrate that SwiftLLM can achieve equivalent performance, or even better, compared to vLLM.
 
-### Offline Inference
+### A Single Forward Operation
 
-The first scenario is offline inference, where we feed the model with a batch of inputs and let it generate one output token (equivelant to one "forward" operation). Here we use LLaMA-3 7B model with NVIDIA A100 80G PCIE / RTX 4090 GPU under FP16 precision. The results are shown below (lower is better):
+The first scenario is "a single forward operation", where we feed the model with a batch of inputs and let it generate one output token (equivelant to one "forward" operation). This is the basic operation of LLM inference (both online and offline) so its performance is crucial.
+
+Here we use LLaMA-3 7B model with NVIDIA A100 80G PCIE / RTX 4090 GPU under FP16 precision. The results are shown below (lower is better):
 
 ![offline-llama-3-7b-a100](https://raw.githubusercontent.com/interestingLSY/swiftLLM/master/docs/assets/offline-llama-3-7b-a100.png)
 
 ![offline-llama-3-7b-4090](https://raw.githubusercontent.com/interestingLSY/swiftLLM/master/docs/assets/offline-llama-3-7b-4090.png)
 
 It can be seen that SwiftLLM can achieve equivalent performance (or even outperform) to vLLM under the same settings.
+
+### Online Serving
+
+The second scenario is "online serving", where we start an API server, sample prompts from a real-world dataset, and let the model generate completions. This is the scenario where LLM is used in real-world applications like chatbots or code completions.
+
+Here we use the [ShareGPT](https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered) dataset to sample prompts, and use a poisson process with different lambdas to simulate different request arrival rates. The results are shown below (lower is better):
