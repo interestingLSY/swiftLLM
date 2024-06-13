@@ -6,6 +6,9 @@ import swiftllm
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.description = """
+        An example script to demonstrate how to use the swiftllm model executor directly for inferencing without using the engine
+    """
     parser.add_argument(
         "--model-path",
         help="Path to the model. Note: please download the model weights from HuggingFace in advance and specify the path here.",
@@ -30,13 +33,17 @@ if __name__ == '__main__':
     )
 
     start_time = time.perf_counter()
+
+    # Initialize the model
+    # For instructions on how to initialize the model, see comments in swiftllm/worker/model.py
     model = swiftllm.LlamaModel(engine_config)
     model.load_weights()
     num_blocks = model.profile_num_blocks()
     print("Number of blocks:", num_blocks)
     model.init_kvcache_and_swap(num_blocks)
-    model_creation_time = time.perf_counter()
-    print(f"Model creation time: {model_creation_time - start_time:.2f} seconds")
+
+    model_creation_time = time.perf_counter() - start_time
+    print(f"Model creation time: {model_creation_time:.2f} seconds")
     
     prompts = [
         "Life blooms like a flower, far away",

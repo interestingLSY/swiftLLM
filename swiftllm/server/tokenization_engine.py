@@ -2,7 +2,6 @@ import ray
 from transformers import AutoTokenizer
 
 from swiftllm.engine_config import EngineConfig
-from .structs import RawRequest, Request
 
 @ray.remote
 class TokenizationEngine:
@@ -12,4 +11,3 @@ class TokenizationEngine:
     def batched_tokenize(self, prompts: list[str]) -> list[list[int]]:
         prompt_token_ids = self.tokenizer(prompts, return_attention_mask=False)['input_ids']
         return prompt_token_ids
-    

@@ -74,13 +74,16 @@ class Scheduler:
             # Try to launch a new prefill batch
             cur_batch = []
             cur_batch_block_needed = 0
+            cur_num_tokens_sum = 0
             while self.waiting_q:
-                cur_seq = self.waiting_q[0]
+                cur_seq: Request = self.waiting_q[0]
                 cur_seq_block_needed = self._get_block_needed(cur_seq)
                 if  len(cur_batch)+1 <= self.engine_config.max_batch_size and \
-                    cur_batch_block_needed + cur_seq_block_needed + self.num_decoding_gpu_blocks <= self.num_gpu_blocks:
+                    cur_batch_block_needed + cur_seq_block_needed + self.num_decoding_gpu_blocks <= self.num_gpu_blocks and \
+                    cur_num_tokens_sum + cur_seq.prompt_len <= self.engine_config.max_tokens_in_batch:
                     cur_batch.append(cur_seq)
                     cur_batch_block_needed += cur_seq_block_needed
+                    cur_num_tokens_sum += cur_seq.prompt_len
                     self.waiting_q.popleft()
                 else:
                     # Strict FCFS
@@ -126,7 +129,6 @@ class Scheduler:
         return self.running_q, newly_swapped_in, newly_swapped_out
     
     def on_batch_finish(self, batch: list[Request]):
-        # pylint: disable=unused-argument
         """
         Called when a batch finishes
         """

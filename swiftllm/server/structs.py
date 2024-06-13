@@ -33,17 +33,23 @@ class Request:
 
     output_q: asyncio.Queue[StepOutput] # Queue initialized when the raw request enters the
                                         # engine, and to be set upon a new token being generated
+                                        # Mainly for streaming the output back to the user
+    finished_event: asyncio.Event       # Event to be set when the request is finished
+                                        # Mainly for the non-streaming case
 
     request_id: int     # Request ID, within range [0, max_seqs_in_block_table).
                         # Generated before being prefilled, and used as the index
                         # into the block table
     output_token_ids: list[int]     # Output token ids
 
-    def __init__(self, raw_request: RawRequest, prompt_token_ids: list[int], output_q: asyncio.Queue[StepOutput]):
-        self.prompt_token_ids = prompt_token_ids
-        self.prompt_len = len(prompt_token_ids)
+    def __init__(self, raw_request: RawRequest):
+        # A request is __init__-ed when entering `untokenized_raw_requests`, and
+        # its `prompt_token_ids` and `prompt_len` will be set upon tokenization
+        self.prompt_token_ids = []
+        self.prompt_len = 0
         self.output_len = raw_request.output_len
-        self.output_q = output_q
+        self.output_q = asyncio.Queue()
+        self.finished_event = asyncio.Event()
         self.request_id = -1
         self.output_token_ids = []
     
