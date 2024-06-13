@@ -1,26 +1,35 @@
 import asyncio
+import argparse
+import time
 from transformers import AutoTokenizer
 
-from swiftllm.engine_config import EngineConfig
-from swiftllm.server.engine import Engine
-from swiftllm.server.structs import RawRequest
+import swiftllm
 
-print_lock = asyncio.Lock()
-
-async def send_request_and_wait(engine: Engine, tokenizer: AutoTokenizer, prompt: str, output_len: int):
-    output_q = engine.add_raw_request(RawRequest(prompt, output_len))
+async def send_request_and_wait(engine: swiftllm.Engine, tokenizer: AutoTokenizer, prompt: str, output_len: int):
+    raw_request = swiftllm.RawRequest(prompt, output_len)
     output_token_ids = []
-    async for step_output in engine.streaming_output(output_q):
+    token_latencies = []
+    last_time = time.perf_counter()
+    async for step_output in engine.add_request_and_streaming(raw_request):
         output_token_ids.append(step_output.token_id)
-    async with print_lock:
-        print("---------------------------------")
-        print(f"Prompt: {prompt}")
-        print(f"Output: {tokenizer.decode(output_token_ids)}")
+        token_latencies.append(time.perf_counter() - last_time)
+        last_time = time.perf_counter()
+    print("---------------------------------")
+    print(f"Prompt: {prompt}")
+    print(f"Output: {tokenizer.decode(output_token_ids)}")
+    print(f"Token latencies (ms): {[round(t*1000, 1) for t in token_latencies]}")
 
 async def main():
-    model_path = "/data/weights/Llama-3-8B-Instruct-Gradient-1048k/"
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--model-path",
+        help="Path to the model. Note: please download the model weights from HuggingFace in advance and specify the path here.",
+        type=str,
+        required=True
+    )
+    model_path = parser.parse_args().model_path
 
-    engine_config = EngineConfig(
+    engine_config = swiftllm.EngineConfig(
         model_path = model_path,
         use_dummy = False,
         
@@ -41,7 +50,7 @@ async def main():
         ("To be or not to be,", 15),
     ]
 
-    engine = Engine(engine_config)
+    engine = swiftllm.Engine(engine_config)
     tokenizer = AutoTokenizer.from_pretrained(model_path)
 
     await engine.initialize()

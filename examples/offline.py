@@ -2,8 +2,7 @@ import time
 import argparse
 from transformers import AutoTokenizer
 
-from swiftllm.engine_config import EngineConfig
-from swiftllm.worker.model import LlamaModel
+import swiftllm
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -15,7 +14,7 @@ if __name__ == '__main__':
     )
     model_path = parser.parse_args().model_path
 
-    engine_config = EngineConfig(
+    engine_config = swiftllm.EngineConfig(
         model_path = model_path,
         use_dummy = False,
         
@@ -31,7 +30,7 @@ if __name__ == '__main__':
     )
 
     start_time = time.perf_counter()
-    model = LlamaModel(engine_config)
+    model = swiftllm.LlamaModel(engine_config)
     model.load_weights()
     num_blocks = model.profile_num_blocks()
     print("Number of blocks:", num_blocks)

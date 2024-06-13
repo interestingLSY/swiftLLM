@@ -24,7 +24,7 @@ class Engine:
         self.scheduler = None
         self.tokenization_engine = None
 
-        self.untokenized_raw_requests: list[RawRequest] = []
+        self.untokenized_raw_requests: list[tuple[RawRequest, asyncio.Queue]] = []
 
     async def _run_on_model_async(self, func, *args, **kwargs):
         """
@@ -59,20 +59,13 @@ class Engine:
         self.tokenization_engine = TokenizationEngine.remote(self.engine_config)
 
         print("[Engine] Model initialized")
-
-    def add_raw_request(self, raw_request: RawRequest) -> asyncio.Queue[StepOutput]:
-        """
-        Add a raw request to the engine, and return the raw request queue.
-        The queue will be set upon new token generation
-        """
-        raw_request.output_q = asyncio.Queue()
-        self.untokenized_raw_requests.append(raw_request)
-        return raw_request.output_q
     
-    async def streaming_output(self, output_q: asyncio.Queue[StepOutput]) -> AsyncGenerator[StepOutput, None]:
+    async def add_request_and_streaming(self, raw_request: RawRequest) -> AsyncGenerator[StepOutput, None]:
         """
-        Stream the output of a request
+        Add a raw request to the engine and stream the output of the request
         """
+        output_q = asyncio.Queue()
+        self.untokenized_raw_requests.append((raw_request, output_q))
         while True:
             step_output = await output_q.get()
             yield step_output
@@ -94,11 +87,11 @@ class Engine:
             cur_untokenized_raw_requests = self.untokenized_raw_requests
             self.untokenized_raw_requests = []
 
-            prompts = [req.prompt for req in cur_untokenized_raw_requests]
+            prompts = [req.prompt for req, _ in cur_untokenized_raw_requests]
             prompt_token_ids = await self.tokenization_engine.batched_tokenize.remote(prompts)
             new_requests = [
-                Request(raw_request, prompt_token_id)
-                for raw_request, prompt_token_id in zip(cur_untokenized_raw_requests, prompt_token_ids)
+                Request(raw_request, prompt_token_id, output_q)
+                for (raw_request, output_q), prompt_token_id in zip(cur_untokenized_raw_requests, prompt_token_ids)
             ]
 
             self.scheduler.on_requests_arrival(new_requests)
