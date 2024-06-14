@@ -98,7 +98,7 @@ class Scheduler:
                 return cur_batch, [], []
         
         # Try to launch a decoding batch
-        # TODO Optimize this `sum`
+        # TODO Optimize this `sum` if possible
         self.num_decoding_gpu_blocks = sum(self._get_block_needed(req) for req in self.running_q)
         newly_swapped_out = []
         while len(self.running_q) > self.engine_config.max_batch_size or \
