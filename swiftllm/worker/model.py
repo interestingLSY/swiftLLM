@@ -160,12 +160,14 @@ class LlamaModel:
 
         # Initialize block manager
         self.gpu_block_manager = BlockManager(
+            "GPU",
             self.num_blocks,
             self.engine_config.max_seqs_in_block_table,
             self.engine_config.max_blocks_per_seq,
             self.engine_config.block_size
         )
         self.cpu_block_manager = BlockManager(
+            "CPU",
             self.engine_config.num_cpu_blocks,
             self.engine_config.max_seqs_in_block_table,
             self.engine_config.max_blocks_per_seq,

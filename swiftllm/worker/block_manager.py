@@ -15,7 +15,8 @@ class BlockManager:
     kernels for fast operations.
     """
 
-    def __init__(self, num_blocks: int, max_seqs_in_block_table: int, max_blocks_per_seq: int, block_size: int):
+    def __init__(self, device_name: str, num_blocks: int, max_seqs_in_block_table: int, max_blocks_per_seq: int, block_size: int):
+        self.device_name = device_name
         self.num_free_blocks = num_blocks
         self.num_blocks = num_blocks
         self.block_size = block_size
@@ -45,7 +46,7 @@ class BlockManager:
         return the block IDs.
         """
         if num_blocks > self.num_free_blocks:
-            raise RuntimeError(f"No enough free blocks available ({self.num_blocks} in total, {self.num_free_blocks} free, {num_blocks} requested)")
+            raise RuntimeError(f"No enough free blocks available on {self.device_name} ({self.num_blocks} in total, {self.num_free_blocks} free, {num_blocks} requested)")
         selected_blocks = torch.nonzero(self.is_block_free)[:num_blocks].view(-1)
         self.num_free_blocks -= num_blocks
         self.is_block_free[selected_blocks] = False
@@ -67,7 +68,7 @@ class BlockManager:
         """
         target_num_blocks = (target_lens + (self.block_size-1)) // self.block_size
         assert (self.num_seq_allocated_blocks[seq_ids] <= target_num_blocks).all(), \
-            f"""Logic error: Some sequences have more blocks already allocated than needed.
+            f"""(On {self.device_name}) Logic error: Some sequences have more blocks already allocated than needed.
                 seq_ids: {seq_ids}, target_lens: {target_lens}, target_num_blocks: {target_num_blocks},
                 self.num_seq_allocated_blocks[seq_ids]: {self.num_seq_allocated_blocks[seq_ids]}"""
         block_needed = target_num_blocks - self.num_seq_allocated_blocks[seq_ids]
