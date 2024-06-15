@@ -79,6 +79,7 @@ class Scheduler:
                 cur_seq: Request = self.waiting_q[0]
                 cur_seq_block_needed = self._get_block_needed(cur_seq)
                 if  len(cur_batch)+1 <= self.engine_config.max_batch_size and \
+                    len(self.running_q)+len(cur_batch)+1 <= self.engine_config.max_batch_size and \
                     cur_batch_block_needed + cur_seq_block_needed + self.num_decoding_gpu_blocks <= self.num_gpu_blocks and \
                     cur_num_tokens_sum + cur_seq.prompt_len <= self.engine_config.max_tokens_in_batch:
                     cur_batch.append(cur_seq)
