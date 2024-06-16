@@ -4,6 +4,8 @@
 
 A tiny yet powerful LLM inference system tailored for researching purpose.
 
+vLLM-equivalent performance with only 2k lines of code (2% of vLLM).
+
 ## Why SwiftLLM
 
 There are so many open source frameworks for LLM serving, including [HuggingFace Transformers](https://github.com/huggingface/transformers), [vLLM](https://github.com/vllm-project/vllm), [LightLLM](https://github.com/ModelTC/lightllm), [DistServe](https://github.com/LLMServe/DistServe) and [DeepSpeed-MII](https://github.com/microsoft/DeepSpeed-MII). Why SwiftLLM?
