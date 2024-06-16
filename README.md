@@ -10,7 +10,7 @@ There are so many open source frameworks for LLM serving, including [HuggingFace
 
 The reason is that, those frameworks are tailored for **production**, instead of **researching**. They are equipped with numerous features, such as 100+ model supports, various hardward supports, LoRA, quantization, multimodal, prefix caching, beam search, and so on. While being an all-in-one solution for production, their codebase is too big and complex to understand and modify (for example, vLLM has 100k+ lines of code), making it hard to use them for researching purpose. Also, their historical burden is also a problem.
 
-SwiftLLM is designed to be a tiny yet powerful LLM inference system tailored for **researching purpose**. "Tiny" means that it only keeps features that are essential for researching, "powerful" means that it has no compromise on performance, and finally "swift" means that it is easy to understand and modify. While supporting basic features (see the list below) and being able to achieve equivalent performance to vLLM, the codebase of SwiftLLM is less than **2k** lines of code, written in Python and [OpenAI Triton](https://github.com/openai/triton) (a DSL for writing CUDA kernels), making it easy to read, modify, debug, test, extend, and can be easily integrated with your novel and brilliant research ideas.
+SwiftLLM is designed to be a tiny yet powerful LLM inference system tailored for **researching purpose**. "Tiny" means that it only keeps features that are essential for researching, "powerful" means that it has no compromise on performance, and finally "swift" means that it is easy to understand and modify. While supporting basic features (see the list below) and being able to achieve equivalent performance to vLLM, the codebase of SwiftLLM is less than **2k** lines of code (~2% of vLLM), written in Python and [OpenAI Triton](https://github.com/openai/triton) (a DSL for writing CUDA kernels), making it easy to read, modify, debug, test, extend, and can be easily integrated with your novel and brilliant research ideas.
 
 ## Feature List
 
@@ -36,9 +36,37 @@ To keep the codebase tiny, we will not support the following features. If you wa
 - Sampling methods other than greedy sampling
 - Hardware supports other than NVIDIA GPU (but it should be easy to migrate to other hardwares as long as OpenAI Triton supports them)
 
-Remember that SwiftLLM is NOT an all-in-one solution for production. It's advised to think it as a "foundation" for your research project, and you may need to implement some features by yourself.
+Remember that SwiftLLM is NOT an all-in-one solution for production. It's advised to think it as a "foundation" for your research project, and you may need to implement some features by yourself. We encourage you, my dear researcher, to read the code, understand it, modify it, and extend it to fit your research needs.
 
 ## Architecture
+
+SwiftLLM's architecture can be divided into two major parts: the *control plane* and the *data plane*.
+
+Briefly speaking, the *control plane* decides "what to compute" or "how to schedule", while the *data plane* decides "how to compute" or "how to implement" and performs the concrete computation. They work in a master-worker manner: the control plane acts like a master, who performs the high-level scheduling and coordination and sends jobs to the data plane, which acts like a worker, who performs the low-level computation.
+
+The code for the control plane resides in the `swiftllm/server` directory, including components like `Engine`, `Scheduler`, the API server, and `TokenizationEngine`. The code for the data plane resides in the `swiftllm/worker` directory, including descriptions of the computation graph (in `swiftllm/worker/model.py`), implementation of layers in the model (in `swiftllm/layers`), and the OpenAI Triton kernels (you can imagine "kernels" as functions executed on the GPU)  (in `swiftllm/kernels`).
+
+Let's take the toy API server (located in `swiftllm/server/api_server.py`) as an example:
+
+- Upon launching, it uses an `EngineConfig` to create an `Engine`.
+- After that, the engine is initialized via `Engine.initialize`, where it creates the `Scheduler`, the `TokenizationEngine`, and a set of (currently only one since Tensor Parallelism is not supported) workers. Then it commands the worker to execute `profile_num_blocks` to calculate the number of GPU blocks, after which the engine commands all workers to allocate their KV cache and KV swap.
+- Finally, the event loop is activated via `Engine.start_all_event_loops`. In each step of the loop, the engine queries the scheduler for the next batch of requests to compute, commands the worker to perform swap in/out, then sends the batch to the worker to compute.
+- The API server listens to user requests and interacts with the engine to fulfill them.
+
+Currently the control plane (`Engine`) and the data plane (`LlamaModel`) resides on the same node. After Tensor Parallelism / Pipeline Parallelism is implemented, the data plane may be distributed to multiple nodes.
+
+## How to Use
+
+We offer two ways to use SwiftLLM: using both the control plane and the data plane, or using only the data plane.
+
+If your idea is simple or elegant enough that can be seamlessly integrated into the existing control plane, you may use both the control plane and the data plane. In another case, where you would like to implement a splendid ide, you may only leverage the data plane, and implement a new control plane by yourself.
+
+## Build and Run
+
+Please follow the instructions below to build and run SwiftLLM.
+
+<TODO>
+
 ## Performance
 
 Despite being tiny (Tiny ones can be adorable too!), SwiftLLM has no compromise on performance. We have evaluated SwiftLLM on several scenarios, and demonstrate that SwiftLLM can achieve equivalent performance, or even better, compared to vLLM.
@@ -60,3 +88,9 @@ It can be seen that SwiftLLM can achieve equivalent performance (or even outperf
 The second scenario is "online serving", where we start an API server, sample prompts from a real-world dataset, and let the model generate completions. This is the scenario where LLM is used in real-world applications like chatbots or code completions.
 
 Here we use the [ShareGPT](https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered) dataset to sample prompts, and use a poisson process with different lambdas to simulate different request arrival rates. The results are shown below (lower is better):
+
+![online-llama-3-7b-a100](https://raw.githubusercontent.com/interestingLSY/swiftLLM/master/docs/assets/online-llama-3-7b-a100.png)
+
+![online-llama-3-7b-4090](https://raw.githubusercontent.com/interestingLSY/swiftLLM/master/docs/assets/online-llama-3-7b-4090.png)
+
+It can be seen that on A100 80G PCIE, SwiftLLM can achieve equivalent performance to vLLM, while on RTX 4090, SwiftLLM significantly outperforms vLLM (mainly because of that our control plane has a lower overhead).
