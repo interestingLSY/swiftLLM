@@ -65,9 +65,26 @@ If your idea is simple or elegant enough that can be seamlessly integrated into 
 
 ## Build and Run
 
-Please follow the instructions below to build and run SwiftLLM.
+First let's set up the environment:
 
-<TODO>
+- You may start from a clean conda environment with Python >= 3.9, or use an existing one. Do not forget to activate the conda environment if you are using one.
+- Install [PyTorch](https://pytorch.org/). Pay attention to select the correct version based on your hardware.
+- Install `packaging` via `pip install packaging`
+
+And then comes the installation:
+
+- Clone this repo via `git clone https://github.com/interestingLSY/swiftLLM.git`
+- `cd` into the repo (`cd swiftLLM`) and install other dependencies via `pip install -r requirements.txt`.
+- PyTorch may install a stable version of [OpenAI Triton](https://github.com/triton-lang/triton) for you. If you like to use the nightly version for the cutting-edge performance but with potential issues, you may uninstall it and install the nightly version.
+- Run `pip install -e .` to install SwiftLLM into your environment.
+- Install some C-bindings via `pip install -e csrc`
+
+Here are some examples:
+
+- Currently SwiftLLM does not support downloading weights from HuggingFace automatically. You may need to clone or download the model weights from HuggingFace first. Both `.bin` format and `.safetensors` format are supported. Assume your model weight is stored at `/data/to/weight/`.
+- For an offline serving example, you can try `python3 examples/offline.py --model-path /data/to/weight`. This example utilizes the data plane only. If you plan to use SwiftLLM without the control plane, this is a good starting point.
+- For an online serving example that uses the `Engine`, you can try `python3 examples/online.py --model-path /data/to/weight`. This is a great example if you plan to use both the control plane and the data plane.
+- For a more complex example, you can refer to `swiftllm/server/api_server.py`. It launches an API server and provides a vLLM-like interface for online serving. 
 
 ## Performance
 
