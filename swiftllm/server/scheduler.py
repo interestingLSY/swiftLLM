@@ -108,11 +108,10 @@ class Scheduler:
             victim = self.running_q.pop()
             self.num_decoding_gpu_blocks -= self._get_block_needed(victim)
             newly_swapped_out.append(victim)
-        newly_swapped_out.reverse()   # Keep it in the order of arrival time
 
         newly_swapped_in = []
         if newly_swapped_out:
-            self.swapped_q.extend(newly_swapped_out)
+            self.swapped_q.extendleft(newly_swapped_out)
         else:
             # No swap-out triggered, try to swap in some requests if possible
             while self.swapped_q:
@@ -127,7 +126,7 @@ class Scheduler:
                 else:
                     break
         
-        return self.running_q, newly_swapped_in, newly_swapped_out
+        return self.running_q, newly_swapped_in, reversed(newly_swapped_out)
     
     def on_batch_finish(self, batch: list[Request]):
         """
