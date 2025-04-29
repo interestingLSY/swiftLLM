@@ -112,7 +112,7 @@ class Scheduler:
 
         newly_swapped_in = []
         if newly_swapped_out:
-            self.swapped_q.extendleft(newly_swapped_out)
+            self.swapped_q.extend(newly_swapped_out)
         else:
             # No swap-out triggered, try to swap in some requests if possible
             while self.swapped_q:
