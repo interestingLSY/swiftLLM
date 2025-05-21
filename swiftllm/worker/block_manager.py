@@ -72,7 +72,7 @@ class BlockManager:
                 seq_ids: {seq_ids}, target_lens: {target_lens}, target_num_blocks: {target_num_blocks},
                 self.num_seq_allocated_blocks[seq_ids]: {self.num_seq_allocated_blocks[seq_ids]}"""
         block_needed = target_num_blocks - self.num_seq_allocated_blocks[seq_ids]
-        new_blocks = self._allocate_blocks(torch.sum(block_needed))
+        new_blocks = self._allocate_blocks(torch.sum(block_needed).item())
 
         set_block_table_and_num_seq_alloc_blocks(self.num_seq_allocated_blocks, self.block_table, new_blocks, seq_ids, block_needed)
 
@@ -82,7 +82,7 @@ class BlockManager:
         """
         Free blocks for sequences.
         """
-        self.num_free_blocks += torch.sum(self.num_seq_allocated_blocks[seq_ids])
+        self.num_free_blocks += torch.sum(self.num_seq_allocated_blocks[seq_ids]).item()
         unset_block_table_and_num_seq_alloc_blocks(self.num_seq_allocated_blocks, self.block_table, seq_ids, self.is_block_free)
 
     def gather_allocated_blocks_and_free(self, seq_ids: torch.Tensor) -> torch.Tensor:
