@@ -149,9 +149,17 @@ class LlamaWeight(WeightBase):
             (self.model_config.vocab_size, self.model_config.hidden_size),
             self.dtype
         ))
+        # Llama 1~3
+        # self.register_weight(RegisteredWeightItem(
+        #     "lm_head",
+        #     "lm_head.weight",
+        #     (self.model_config.vocab_size, self.model_config.hidden_size),
+        #     self.dtype
+        # ))
+        # Llama 3.1+
         self.register_weight(RegisteredWeightItem(
             "lm_head",
-            "lm_head.weight",
+            "model.embed_tokens.weight",
             (self.model_config.vocab_size, self.model_config.hidden_size),
             self.dtype
         ))

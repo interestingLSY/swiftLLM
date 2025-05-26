@@ -112,6 +112,8 @@ def gather_allocated_blocks_and_unset(
     """
     Gather the block IDs allocated for the specified sequences and mark them as free
     """
+    if seq_ids.numel() == 0:
+        return torch.empty((0,), dtype=torch.int32, device=block_table.device)
     num_allocated_blocks_cumsum = torch.cumsum(num_seq_allocated_blocks[seq_ids], 0)
     gathered_block_ids = torch.empty((num_allocated_blocks_cumsum[-1].item(),), dtype=torch.int32, device=block_table.device)
 

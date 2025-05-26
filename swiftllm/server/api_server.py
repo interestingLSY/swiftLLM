@@ -31,8 +31,12 @@ async def generate(req: fastapi.Request) -> fastapi.Response:
     if req_dict.get("stream", False):
         generator = engine.add_request_and_stream(raw_request)
         async def wrapper():
+            output_token_ids = []
             async for step_output in generator:
-                yield f"{step_output.token_id}\n"
+                output_token_ids.append(step_output.token_id)
+                # yield f"{step_output.token_id}\n"
+                decoded = await engine.tokenization_engine.decode.remote(output_token_ids, skip_special_tokens=True)
+                yield f"{decoded}\n"
         return fastapi.responses.StreamingResponse(
             wrapper(),
             media_type="text/plain"
@@ -40,9 +44,13 @@ async def generate(req: fastapi.Request) -> fastapi.Response:
     else:
         # TODO Abort the request when the client disconnects
         (_, output_token_ids) = await engine.add_request_and_wait(raw_request)
+        decoded = await engine.tokenization_engine.decode.remote(output_token_ids, skip_special_tokens=True)
         return fastapi.responses.JSONResponse(
-            content={"output_token_ids": output_token_ids}
+            content={"output": decoded, "output_token_ids": output_token_ids}
         )
+        # return fastapi.responses.JSONResponse(
+        #     content={"output_token_ids": output_token_ids}
+        # )
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
