@@ -181,14 +181,14 @@ class LlamaModel:
 
         # Handle the case where rope_scaling is a dictionary (Llama 3.2)
         if isinstance(rope_scaling, dict):
-            scaling_factor = rope_scaling.get('factor', 1.0)
+            scaling_factor = rope_scaling.get('factor', 4.0)
             low_freq_factor = rope_scaling.get('low_freq_factor', 1.0)
             high_freq_factor = rope_scaling.get('high_freq_factor', 1.0)
             rope_type = rope_scaling.get('rope_type', 'llama3')
             original_max_position_embeddings = rope_scaling.get('original_max_position_embeddings', max_position_embeddings)
 
             # Calculate maximum sequence length based on scaling factor
-            max_seq_len = max_position_embeddings * scaling_factor
+            max_seq_len = int(original_max_position_embeddings * scaling_factor)
 
             # Generate position indices
             dim = self.model_config.head_dim
